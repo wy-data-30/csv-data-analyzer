@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart CSV Analyzer</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">Data Analysis Tool</p>
+      <h1>Smart CSV Analyzer</h1>
+      <p class="subtitle">上传 CSV，自动完成数据质量检查、统计分析和可视化。</p>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <section id="dropZone" class="upload-panel">
+      <div class="upload-copy">
+        <p class="section-kicker">Upload</p>
+        <h2>上传 CSV 开始分析</h2>
+        <p>支持拖拽上传，也可以选择本地文件。所有解析、统计和图表都在浏览器端完成。</p>
+      </div>
+      <div class="upload-actions">
+        <label class="file-button" for="csvFile">选择 CSV 文件</label>
+        <input id="csvFile" type="file" accept=".csv,text/csv">
+        <button id="loadSample" type="button">加载示例数据</button>
+        <a class="secondary-button" href="sample-data.csv" download>下载示例数据</a>
+      </div>
+      <div class="upload-meta">
+        <span>支持表头行</span>
+        <span>自动识别字段类型</span>
+        <span>无需后端</span>
+      </div>
+    </section>
+
+    <section id="statusPanel" class="status-panel hidden" aria-live="polite"></section>
+
+    <section id="results" class="results hidden">
+      <section class="section-block">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Overview</p>
+            <h2>数据概览</h2>
+          </div>
+          <p id="sourceName" class="muted"></p>
+        </div>
+        <div id="overviewCards" class="metric-grid"></div>
+        <div class="module-subsection">
+          <h3 class="subsection-title">前 10 行数据预览</h3>
+          <div class="table-wrap">
+            <table id="previewTable"></table>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-block">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Schema</p>
+            <h2>字段类型识别</h2>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="schemaTable"></table>
+        </div>
+      </section>
+
+      <section class="section-block">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Quality</p>
+            <h2>数据质量报告</h2>
+          </div>
+        </div>
+        <div id="qualitySummary" class="quality-summary"></div>
+        <div class="two-column">
+          <div>
+            <h3 class="subsection-title">缺失值检查</h3>
+            <div class="table-wrap compact">
+              <table id="qualityTable"></table>
+            </div>
+          </div>
+          <div>
+            <h3 class="subsection-title">数值字段异常值检查</h3>
+            <div class="table-wrap compact">
+              <table id="outlierTable"></table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-block">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Statistics</p>
+            <h2>描述性统计</h2>
+          </div>
+        </div>
+        <div class="module-subsection first">
+          <h3 class="subsection-title">数值字段统计指标</h3>
+          <div class="table-wrap">
+            <table id="numericStatsTable"></table>
+          </div>
+        </div>
+        <div class="module-subsection">
+          <h3 class="subsection-title">分类字段频数统计</h3>
+          <div id="categoryStats" class="category-grid"></div>
+        </div>
+      </section>
+
+      <section class="section-block">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Charts</p>
+            <h2>图表分析</h2>
+          </div>
+        </div>
+        <div class="chart-grid">
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3>数值字段分布</h3>
+              <select id="numericChartField"></select>
+            </div>
+            <div class="chart-frame"><canvas id="numericDistributionChart"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3>分类字段 Top 10</h3>
+              <select id="categoryChartField"></select>
+            </div>
+            <div class="chart-frame"><canvas id="categoryTopChart"></canvas></div>
+          </div>
+          <div class="chart-card wide">
+            <div class="chart-header">
+              <h3>日期字段趋势</h3>
+              <select id="dateChartField"></select>
+            </div>
+            <div class="chart-frame"><canvas id="dateTrendChart"></canvas></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-block">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Custom Analysis</p>
+            <h2>自定义分析</h2>
+          </div>
+        </div>
+
+        <div class="module-subsection first">
+          <h3 class="subsection-title">字段选择器与通用分析</h3>
+          <div class="field-selector-panel">
+            <label>
+              分析指标字段
+              <select id="v2MetricField"></select>
+            </label>
+            <label>
+              分组维度字段
+              <select id="v2GroupField"></select>
+            </label>
+            <label>
+              时间字段（可选）
+              <select id="v2DateField"></select>
+            </label>
+            <button id="v2AnalyzeButton" type="button">重新选择字段并分析</button>
+          </div>
+          <div id="v2FieldPrompt" class="analysis-prompt"></div>
+          <div id="v2AnalysisResults" class="v2-analysis-results hidden">
+            <div id="v2SummaryCards" class="analysis-summary-grid"></div>
+            <div class="two-column">
+              <div>
+                <h3 class="subsection-title">按分组字段求和结果</h3>
+                <div class="table-wrap compact">
+                  <table id="v2SumTable"></table>
+                </div>
+              </div>
+              <div>
+                <h3 class="subsection-title">按分组字段平均值结果</h3>
+                <div class="table-wrap compact">
+                  <table id="v2AvgTable"></table>
+                </div>
+              </div>
+            </div>
+            <div class="chart-grid">
+              <div class="chart-card">
+                <div class="chart-header">
+                  <h3>Top 10 分组柱状图</h3>
+                </div>
+                <div class="chart-frame"><canvas id="v2TopGroupChart"></canvas></div>
+              </div>
+              <div id="v2TrendCard" class="chart-card">
+                <div class="chart-header">
+                  <h3>时间趋势图</h3>
+                </div>
+                <div class="chart-frame"><canvas id="v2SelectedTrendChart"></canvas></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="module-subsection">
+          <h3 class="subsection-title">场景模板分析</h3>
+          <div class="template-selector-panel">
+            <label>
+              分析模板
+              <select id="scenarioTemplate">
+                <option value="generic">通用数据分析</option>
+                <option value="sales">销售数据分析</option>
+                <option value="score">成绩数据分析</option>
+                <option value="usedGoods">二手商品价格分析</option>
+                <option value="survey">问卷调查分析</option>
+                <option value="behavior">用户行为分析</option>
+              </select>
+            </label>
+          </div>
+          <div id="templateMappingForm" class="template-mapping-grid"></div>
+          <div class="template-actions">
+            <button id="runTemplateAnalysis" type="button">按模板生成分析</button>
+          </div>
+          <div id="templatePrompt" class="analysis-prompt"></div>
+          <div id="templateResults" class="template-results hidden">
+            <div id="templateSummaryCards" class="analysis-summary-grid"></div>
+            <div id="templateInsights" class="insights"></div>
+            <div class="table-wrap">
+              <table id="templatePrimaryTable"></table>
+            </div>
+            <div class="chart-grid">
+              <div class="chart-card">
+                <div class="chart-header">
+                  <h3 id="templateMainChartTitle">模板主图</h3>
+                </div>
+                <div class="chart-frame"><canvas id="templateMainChart"></canvas></div>
+              </div>
+              <div class="chart-card">
+                <div class="chart-header">
+                  <h3 id="templateSecondaryChartTitle">模板辅助图</h3>
+                </div>
+                <div class="chart-frame"><canvas id="templateSecondaryChart"></canvas></div>
+              </div>
+              <div id="templateTrendCard" class="chart-card wide">
+                <div class="chart-header">
+                  <h3 id="templateTrendChartTitle">时间趋势</h3>
+                </div>
+                <div class="chart-frame"><canvas id="templateTrendChart"></canvas></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="module-subsection">
+          <h3 class="subsection-title">自定义分组图</h3>
+          <div class="control-row">
+            <label>
+              分析指标
+              <select id="metricField"></select>
+            </label>
+            <label>
+              分组维度
+              <select id="groupField"></select>
+            </label>
+            <label>
+              汇总方式
+              <select id="aggregateMethod">
+                <option value="sum">合计</option>
+                <option value="avg">平均值</option>
+                <option value="median">中位数</option>
+              </select>
+            </label>
+          </div>
+          <div class="chart-frame custom-chart"><canvas id="customAnalysisChart"></canvas></div>
+        </div>
+      </section>
+
+      <section class="section-block">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Insights</p>
+            <h2>分析结论</h2>
+          </div>
+        </div>
+        <div id="insights" class="insights"></div>
+      </section>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>

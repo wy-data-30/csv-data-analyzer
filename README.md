@@ -1,6 +1,6 @@
 # Smart CSV Analyzer
 
-**Live Demo:** [你的 GitHub Pages 链接](https://your-github-username.github.io/your-repository/)
+**Live Demo:** [你的 GitHub Pages 链接](https://wy-data-30.github.io/csv-data-analyzer/)
 
 Smart CSV Analyzer is a browser-based CSV analysis tool for quick exploration of structured CSV files. After a user uploads a CSV file, the application performs data preview, field type detection, data quality checks, descriptive statistics, chart generation, custom grouping analysis, and basic insight generation entirely in the browser.
 

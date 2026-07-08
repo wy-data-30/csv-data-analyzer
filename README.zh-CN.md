@@ -58,6 +58,16 @@ CSV 文件经常来自不同系统或业务场景，字段结构并不固定。S
 └── README.zh-CN.md
 ```
 
+## 项目截图
+
+### 首页
+
+![Smart CSV Analyzer 首页](./assets/homepage.png.png)
+
+### 分析结果
+
+![Smart CSV Analyzer 分析结果](<./assets/屏幕截图 2026-07-08 164952.png>)
+
 ## 本地运行
 
 可以直接用浏览器打开 `index.html`。

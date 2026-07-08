@@ -50,6 +50,16 @@ External libraries are loaded through CDN links in `index.html`.
 └── README.md
 ```
 
+## Screenshots
+
+### Home Page
+
+![Smart CSV Analyzer home page](./assets/homepage.png.png)
+
+### Analysis Results
+
+![Smart CSV Analyzer analysis results](<./assets/屏幕截图 2026-07-08 164952.png>)
+
 ## Getting Started
 
 You can open `index.html` directly in a browser.

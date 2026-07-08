@@ -1,6 +1,6 @@
 # Smart CSV Analyzer
 
-**在线演示：** [你的 GitHub Pages 链接](https://wy-data-30.github.io/csv-data-analyzer/)
+**在线演示：** [打开 Smart CSV Analyzer](https://wy-data-30.github.io/csv-data-analyzer/)
 
 [English README](./README.md)
 

@@ -11,6 +11,7 @@ const state = {
 
 const dom = {
   fileInput: document.getElementById("csvFile"),
+  fileEncoding: document.getElementById("fileEncoding"),
   loadSample: document.getElementById("loadSample"),
   dropZone: document.getElementById("dropZone"),
   statusPanel: document.getElementById("statusPanel"),
@@ -53,6 +54,13 @@ const dom = {
   templateSecondaryChartTitle: document.getElementById("templateSecondaryChartTitle"),
   templateTrendCard: document.getElementById("templateTrendCard"),
   templateTrendChartTitle: document.getElementById("templateTrendChartTitle")
+};
+
+const ENCODING_LABELS = {
+  auto: "自动识别",
+  "utf-8": "UTF-8",
+  gbk: "GBK",
+  gb18030: "GB18030"
 };
 
 const TEMPLATE_DEFINITIONS = {
@@ -187,15 +195,18 @@ dom.runTemplateAnalysis.addEventListener("click", runTemplateAnalysis);
   });
 });
 
-function parseCsvFile(file) {
+async function parseCsvFile(file) {
   resetAnalysisState();
-  setStatus(`正在解析 ${file.name} ...`);
-  Papa.parse(file, {
-    header: true,
-    skipEmptyLines: true,
-    complete: (results) => handleParsedData(results, file.name),
-    error: (error) => showError(error.message)
-  });
+  try {
+    const selectedEncoding = dom.fileEncoding.value || "auto";
+    setStatus(`正在读取 ${file.name} ...`);
+    const buffer = await readFileAsArrayBuffer(file);
+    const decoded = decodeCsvBuffer(buffer, selectedEncoding);
+    setStatus(`正在解析 ${file.name}（${decoded.label}）...`);
+    parseCsvText(decoded.text, file.name);
+  } catch (error) {
+    showError(error.message);
+  }
 }
 
 function parseCsvText(text, sourceName) {
@@ -206,6 +217,69 @@ function parseCsvText(text, sourceName) {
     complete: (results) => handleParsedData(results, sourceName),
     error: (error) => showError(error.message)
   });
+}
+
+function readFileAsArrayBuffer(file) {
+  if (typeof file.arrayBuffer === "function") {
+    return file.arrayBuffer();
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("文件读取失败"));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function decodeCsvBuffer(buffer, selectedEncoding) {
+  if (selectedEncoding === "auto") {
+    return autoDecodeCsvBuffer(buffer);
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(ENCODING_LABELS, selectedEncoding)) {
+    throw new Error("不支持的文件编码。");
+  }
+
+  return {
+    text: decodeText(buffer, selectedEncoding),
+    label: ENCODING_LABELS[selectedEncoding]
+  };
+}
+
+function autoDecodeCsvBuffer(buffer) {
+  if (hasUtf8Bom(buffer)) {
+    return {
+      text: decodeText(buffer, "utf-8"),
+      label: "UTF-8"
+    };
+  }
+
+  try {
+    return {
+      text: decodeText(buffer, "utf-8", true),
+      label: "UTF-8"
+    };
+  } catch {
+    return {
+      text: decodeText(buffer, "gb18030"),
+      label: "GB18030 自动识别"
+    };
+  }
+}
+
+function hasUtf8Bom(buffer) {
+  const bytes = new Uint8Array(buffer);
+  return bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
+}
+
+function decodeText(buffer, encoding, fatal = false) {
+  try {
+    return new TextDecoder(encoding, { fatal }).decode(buffer);
+  } catch (error) {
+    if (fatal) throw error;
+    throw new Error(`当前浏览器不支持 ${ENCODING_LABELS[encoding] || encoding} 解码，请尝试选择其他编码或将文件另存为 CSV UTF-8。`);
+  }
 }
 
 function handleParsedData(results, sourceName) {

@@ -25,6 +25,15 @@
         <p>支持拖拽上传，也可以选择本地文件。所有解析、统计和图表都在浏览器端完成。</p>
       </div>
       <div class="upload-actions">
+        <label class="encoding-control" for="fileEncoding">
+          文件编码
+          <select id="fileEncoding">
+            <option value="auto" selected>自动识别</option>
+            <option value="utf-8">UTF-8</option>
+            <option value="gbk">GBK</option>
+            <option value="gb18030">GB18030</option>
+          </select>
+        </label>
         <label class="file-button" for="csvFile">选择 CSV 文件</label>
         <input id="csvFile" type="file" accept=".csv,text/csv">
         <button id="loadSample" type="button">加载示例数据</button>
@@ -32,6 +41,7 @@
       </div>
       <div class="upload-meta">
         <span>支持表头行</span>
+        <span>支持 UTF-8 / GBK / GB18030</span>
         <span>自动识别字段类型</span>
         <span>无需后端</span>
       </div>

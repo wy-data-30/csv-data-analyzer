@@ -11,6 +11,7 @@ The project is built as a static website and does not require a backend service,
 ## Features
 
 - Upload and parse CSV files in the browser.
+- Select CSV file encoding manually, including Auto Detect, UTF-8, GBK, and GB18030.
 - Preview the first 10 rows of the dataset.
 - Automatically identify numeric, categorical, date, and ID fields.
 - Generate a dataset overview, including row count, field count, field type counts, missing values, and duplicate rows.
@@ -70,12 +71,15 @@ Using a local static server is recommended because some browsers restrict `fetch
 ## Usage
 
 1. Open the application in a browser.
-2. Upload a CSV file by selecting a file or dragging it into the upload area.
-3. Review the generated data overview, schema detection, quality report, statistics, charts, and insights.
-4. Use the field selectors to choose a metric, grouping field, and optional date field for custom analysis.
-5. Select a scenario template and map fields manually when the dataset fits a supported analysis scenario.
+2. Select the CSV file encoding if needed. Use Auto Detect by default, or choose GBK/GB18030 for CSV files exported from Chinese Windows Excel/WPS when Chinese text appears garbled.
+3. Upload a CSV file by selecting a file or dragging it into the upload area.
+4. Review the generated data overview, schema detection, quality report, statistics, charts, and insights.
+5. Use the field selectors to choose a metric, grouping field, and optional date field for custom analysis.
+6. Select a scenario template and map fields manually when the dataset fits a supported analysis scenario.
 
 The application does not require fixed column names. Template analysis is based on the fields selected by the user.
+
+If Chinese headers or category values are displayed incorrectly, try selecting `GBK` or `GB18030` before uploading the file. Another option is to reopen the file in Excel/WPS and export it as `CSV UTF-8`.
 
 ## Sample Data
 

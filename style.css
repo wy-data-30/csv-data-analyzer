@@ -175,6 +175,30 @@ button:hover,
   justify-content: flex-end;
 }
 
+.encoding-control {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.encoding-control select {
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #ffffff;
+  color: var(--text);
+}
+
 .upload-meta {
   display: flex;
   flex-wrap: wrap;
@@ -647,6 +671,8 @@ select {
   button,
   .file-button,
   .secondary-button,
+  .encoding-control,
+  .encoding-control select,
   .field-selector-panel label,
   .field-selector-panel select,
   .field-selector-panel button,

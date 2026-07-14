@@ -63,6 +63,27 @@ const ENCODING_LABELS = {
   gb18030: "GB18030"
 };
 
+const CHART_THEME = {
+  primary: "#625bde",
+  primaryFill: "rgba(98, 91, 222, 0.12)",
+  secondary: "#0f9f8f",
+  secondaryFill: "rgba(15, 159, 143, 0.12)",
+  warning: "#e09a32",
+  text: "#697084",
+  grid: "rgba(211, 215, 227, 0.72)"
+};
+
+if (window.Chart) {
+  Chart.defaults.color = CHART_THEME.text;
+  Chart.defaults.font.family = 'Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif';
+  Chart.defaults.font.size = 11;
+  Chart.defaults.elements.bar.borderRadius = 6;
+  Chart.defaults.elements.bar.borderSkipped = false;
+  Chart.defaults.elements.line.borderWidth = 2.25;
+  Chart.defaults.elements.point.radius = 0;
+  Chart.defaults.elements.point.hoverRadius = 4;
+}
+
 const TEMPLATE_DEFINITIONS = {
   generic: {
     name: "通用数据分析",
@@ -124,6 +145,8 @@ const TEMPLATE_DEFINITIONS = {
     ]
   }
 };
+
+setupResultNavigation();
 
 dom.fileInput.addEventListener("change", (event) => {
   const file = event.target.files[0];
@@ -194,6 +217,39 @@ dom.runTemplateAnalysis.addEventListener("click", runTemplateAnalysis);
     }
   });
 });
+
+function setupResultNavigation() {
+  const links = Array.from(document.querySelectorAll(".results-nav nav a"));
+  const sections = links
+    .map((link) => document.querySelector(link.getAttribute("href")))
+    .filter(Boolean);
+
+  const setActiveLink = (sectionId) => {
+    links.forEach((link) => {
+      link.classList.toggle("active", link.getAttribute("href") === `#${sectionId}`);
+    });
+  };
+
+  links.forEach((link) => {
+    link.addEventListener("click", () => {
+      const sectionId = link.getAttribute("href").slice(1);
+      setActiveLink(sectionId);
+    });
+  });
+
+  if ("IntersectionObserver" in window) {
+    const observer = new IntersectionObserver((entries) => {
+      const visibleSection = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+      if (visibleSection) setActiveLink(visibleSection.target.id);
+    }, {
+      rootMargin: "-15% 0px -68% 0px",
+      threshold: [0, 0.1, 0.35]
+    });
+    sections.forEach((section) => observer.observe(section));
+  }
+}
 
 async function parseCsvFile(file) {
   resetAnalysisState();
@@ -311,7 +367,8 @@ function handleParsedData(results, sourceName) {
   state.numericStats = buildNumericStats();
   state.categoryStats = buildCategoryStats();
 
-  dom.sourceName.textContent = `当前文件：${sourceName}`;
+  dom.sourceName.textContent = `已载入 · ${sourceName}`;
+  dom.sourceName.title = sourceName;
   dom.results.classList.remove("hidden");
   dom.statusPanel.className = "status-panel hidden";
 
@@ -676,7 +733,7 @@ function renderNumericDistributionChart() {
       datasets: [{
         label: `${field} 分布`,
         data: bins.map((bin) => bin.count),
-        backgroundColor: "#1f6feb"
+        backgroundColor: CHART_THEME.primary
       }]
     },
     options: chartOptions("数量")
@@ -699,7 +756,7 @@ function renderCategoryTopChart() {
       datasets: [{
         label: `${field} Top 10`,
         data: counts.map(([, count]) => count),
-        backgroundColor: "#17805d"
+        backgroundColor: CHART_THEME.secondary
       }]
     },
     options: chartOptions("频数")
@@ -721,8 +778,8 @@ function renderDateTrendChart() {
       datasets: [{
         label: trend.label,
         data: trend.values,
-        borderColor: "#1f6feb",
-        backgroundColor: "rgba(31, 111, 235, 0.14)",
+        borderColor: CHART_THEME.primary,
+        backgroundColor: CHART_THEME.primaryFill,
         tension: 0.25,
         fill: true
       }]
@@ -751,7 +808,7 @@ function renderCustomAnalysisChart() {
       datasets: [{
         label: `${group} 分组的 ${metric} ${methodLabel}`,
         data: grouped.map((item) => item.value),
-        backgroundColor: "#b56a00"
+        backgroundColor: CHART_THEME.warning
       }]
     },
     options: chartOptions(methodLabel)
@@ -885,7 +942,7 @@ function renderV2TopGroupChart(metricField, groupField, grouped) {
       datasets: [{
         label: `${groupField} Top 10（${metricField} 求和）`,
         data: topGroups.map((item) => item.sum),
-        backgroundColor: "#1f6feb"
+        backgroundColor: CHART_THEME.primary
       }]
     },
     options: chartOptions("求和值")
@@ -906,8 +963,8 @@ function renderV2TrendChart(metricField, dateField) {
       datasets: [{
         label: `${metricField} 按时间求和趋势`,
         data: trend.values,
-        borderColor: "#17805d",
-        backgroundColor: "rgba(23, 128, 93, 0.14)",
+        borderColor: CHART_THEME.secondary,
+        backgroundColor: CHART_THEME.secondaryFill,
         tension: 0.25,
         fill: true
       }]
@@ -1086,8 +1143,8 @@ function renderTemplateChart(chartId, titleElement, chartConfig) {
       datasets: [{
         label: chartConfig.label,
         data: chartConfig.values,
-        borderColor: chartConfig.color || "#1f6feb",
-        backgroundColor: chartConfig.background || chartConfig.color || "#1f6feb",
+        borderColor: chartConfig.color || CHART_THEME.primary,
+        backgroundColor: chartConfig.background || chartConfig.color || CHART_THEME.primary,
         tension: 0.25,
         fill: chartConfig.type === "line"
       }]
@@ -1121,7 +1178,7 @@ function analyzeGenericTemplate(mappings) {
     ],
     insights,
     table: numericGroupTable(mappings.group, mappings.metric, grouped),
-    mainChart: barChartConfig(`按 ${mappings.group} 的 ${mappings.metric} 求和 Top 10`, grouped.slice(0, 10).map((item) => item.name), grouped.slice(0, 10).map((item) => item.sum), `${mappings.metric} 求和`, "求和值", "#1f6feb"),
+    mainChart: barChartConfig(`按 ${mappings.group} 的 ${mappings.metric} 求和 Top 10`, grouped.slice(0, 10).map((item) => item.name), grouped.slice(0, 10).map((item) => item.sum), `${mappings.metric} 求和`, "求和值", CHART_THEME.primary),
     secondaryChart: histogramChartConfig(`${mappings.metric} 分布`, values, "记录数"),
     trendChart: trend ? lineChartConfig(`${mappings.metric} 时间趋势`, trend.labels, trend.values, `${mappings.metric} 求和`, "求和值") : null
   };
@@ -1164,8 +1221,8 @@ function analyzeSalesTemplate(mappings) {
     table: metricRows
       ? numericGroupTable(mappings.category, metricLabel, categoryRows)
       : frequencyTable(mappings.category, categoryRows),
-    mainChart: barChartConfig(`按 ${mappings.category} 的 ${metricLabel} Top 10`, topLabels(categoryRows), topValues(categoryRows, metricRows ? "sum" : "count"), metricRows ? `${metricLabel} 求和` : "记录数", metricRows ? "求和值" : "记录数", "#1f6feb"),
-    secondaryChart: barChartConfig(`按 ${mappings.region} 的 ${metricLabel} Top 10`, topLabels(regionRows), topValues(regionRows, metricRows ? "sum" : "count"), metricRows ? `${metricLabel} 求和` : "记录数", metricRows ? "求和值" : "记录数", "#17805d"),
+    mainChart: barChartConfig(`按 ${mappings.category} 的 ${metricLabel} Top 10`, topLabels(categoryRows), topValues(categoryRows, metricRows ? "sum" : "count"), metricRows ? `${metricLabel} 求和` : "记录数", metricRows ? "求和值" : "记录数", CHART_THEME.primary),
+    secondaryChart: barChartConfig(`按 ${mappings.region} 的 ${metricLabel} Top 10`, topLabels(regionRows), topValues(regionRows, metricRows ? "sum" : "count"), metricRows ? `${metricLabel} 求和` : "记录数", metricRows ? "求和值" : "记录数", CHART_THEME.secondary),
     trendChart: trend ? lineChartConfig(`${metricLabel} 时间趋势`, trend.labels, trend.values, metricRows ? `${metricLabel} 求和` : "记录数", metricRows ? "求和值" : "记录数") : null
   };
 }
@@ -1196,7 +1253,7 @@ function analyzeScoreTemplate(mappings) {
     insights,
     table: dimension ? numericGroupTable(dimension, mappings.score, grouped) : simpleStatsTable(mappings.score, stats, values.length),
     mainChart: dimension
-      ? barChartConfig(`按 ${dimension} 的成绩平均值 Top 10`, topLabels(grouped, "avg"), topValues(grouped, "avg"), "成绩平均值", "平均值", "#1f6feb")
+      ? barChartConfig(`按 ${dimension} 的成绩平均值 Top 10`, topLabels(grouped, "avg"), topValues(grouped, "avg"), "成绩平均值", "平均值", CHART_THEME.primary)
       : histogramChartConfig(`${mappings.score} 分布`, values, "记录数"),
     secondaryChart: histogramChartConfig(`${mappings.score} 分布`, values, "记录数"),
     trendChart: trend ? lineChartConfig(`${mappings.score} 时间趋势`, trend.labels, trend.values, "成绩平均值", "平均值") : null
@@ -1229,7 +1286,7 @@ function analyzeUsedGoodsTemplate(mappings) {
     insights,
     table: primaryDimension ? numericGroupTable(primaryDimension, mappings.price, grouped) : simpleStatsTable(mappings.price, stats, values.length),
     mainChart: primaryDimension
-      ? barChartConfig(`按 ${primaryDimension} 的平均价格 Top 10`, topLabels(grouped, "avg"), topValues(grouped, "avg"), "平均价格", "平均值", "#1f6feb")
+      ? barChartConfig(`按 ${primaryDimension} 的平均价格 Top 10`, topLabels(grouped, "avg"), topValues(grouped, "avg"), "平均价格", "平均值", CHART_THEME.primary)
       : histogramChartConfig(`${mappings.price} 分布`, values, "记录数"),
     secondaryChart: histogramChartConfig(`${mappings.price} 分布`, values, "记录数"),
     trendChart: trend ? lineChartConfig(`${mappings.price} 时间趋势`, trend.labels, trend.values, "平均价格", "平均值") : null
@@ -1269,11 +1326,11 @@ function analyzeSurveyTemplate(mappings) {
     insights,
     table: surveyTable(numericSummaries, categoricalFields),
     mainChart: primaryCategory
-      ? barChartConfig(`${primaryCategory} Top 10`, topLabels(primaryRows), topValues(primaryRows, "count"), "频数", "频数", "#1f6feb")
+      ? barChartConfig(`${primaryCategory} Top 10`, topLabels(primaryRows), topValues(primaryRows, "count"), "频数", "频数", CHART_THEME.primary)
       : histogramChartConfig(numericSummaries[0]?.field || "数值字段", chartValues, "记录数"),
     secondaryChart: numericSummaries[0]
       ? histogramChartConfig(`${numericSummaries[0].field} 分布`, chartValues, "记录数")
-      : barChartConfig("分类字段 Top 10", topLabels(primaryRows), topValues(primaryRows, "count"), "频数", "频数", "#17805d"),
+      : barChartConfig("分类字段 Top 10", topLabels(primaryRows), topValues(primaryRows, "count"), "频数", "频数", CHART_THEME.secondary),
     trendChart: null
   };
 }
@@ -1306,8 +1363,8 @@ function analyzeBehaviorTemplate(mappings) {
     ],
     insights,
     table: frequencyTable(mappings.event, eventRows),
-    mainChart: barChartConfig(`${mappings.event} Top 10`, topLabels(eventRows), topValues(eventRows, "count"), "事件数", "记录数", "#1f6feb"),
-    secondaryChart: barChartConfig(`${secondaryField || mappings.userId} Top 10`, topLabels(secondaryRows), topValues(secondaryRows, "count"), "记录数", "记录数", "#17805d"),
+    mainChart: barChartConfig(`${mappings.event} Top 10`, topLabels(eventRows), topValues(eventRows, "count"), "事件数", "记录数", CHART_THEME.primary),
+    secondaryChart: barChartConfig(`${secondaryField || mappings.userId} Top 10`, topLabels(secondaryRows), topValues(secondaryRows, "count"), "记录数", "记录数", CHART_THEME.secondary),
     trendChart: trend ? lineChartConfig("事件记录时间趋势", trend.labels, trend.values, "记录数", "记录数") : null
   };
 }
@@ -1509,8 +1566,8 @@ function lineChartConfig(title, labels, values, label, axisLabel) {
     values,
     label,
     axisLabel,
-    color: "#17805d",
-    background: "rgba(23, 128, 93, 0.14)"
+    color: CHART_THEME.secondary,
+    background: CHART_THEME.secondaryFill
   };
 }
 
@@ -1523,7 +1580,7 @@ function histogramChartConfig(title, values, axisLabel) {
     values: bins.map((bin) => bin.count),
     label: title,
     axisLabel,
-    color: "#b56a00"
+    color: CHART_THEME.warning
   };
 }
 
@@ -1644,18 +1701,30 @@ function chartOptions(axisLabel) {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: { display: true, position: "bottom" },
-      tooltip: { mode: "index", intersect: false }
+      legend: { display: false },
+      tooltip: {
+        mode: "index",
+        intersect: false,
+        displayColors: false,
+        backgroundColor: "rgba(22, 24, 40, 0.94)",
+        titleColor: "#ffffff",
+        bodyColor: "#e5e7ef",
+        padding: 11,
+        cornerRadius: 8
+      }
     },
     scales: {
       x: {
-        ticks: { maxRotation: 45, minRotation: 0 },
-        grid: { display: false }
+        ticks: { maxRotation: 0, minRotation: 0, color: CHART_THEME.text, autoSkip: true, maxTicksLimit: 9 },
+        grid: { display: false },
+        border: { display: false }
       },
       y: {
         beginAtZero: true,
-        title: { display: true, text: axisLabel },
-        grid: { color: "rgba(148, 163, 184, 0.24)" }
+        title: { display: true, text: axisLabel, color: CHART_THEME.text },
+        ticks: { color: CHART_THEME.text },
+        grid: { color: CHART_THEME.grid },
+        border: { display: false }
       }
     }
   };
@@ -1665,8 +1734,8 @@ function drawEmptyChart(canvas, text) {
   const context = canvas.getContext("2d");
   context.clearRect(0, 0, canvas.width, canvas.height);
   context.save();
-  context.font = "14px Arial";
-  context.fillStyle = "#657184";
+  context.font = '13px Inter, "Segoe UI", "Microsoft YaHei", sans-serif';
+  context.fillStyle = CHART_THEME.text;
   context.textAlign = "center";
   context.fillText(text, canvas.width / 2, canvas.height / 2);
   context.restore();
@@ -1684,6 +1753,7 @@ function resetAnalysisState() {
   state.totalMissing = 0;
 
   dom.sourceName.textContent = "";
+  dom.sourceName.removeAttribute("title");
   dom.overviewCards.innerHTML = "";
   dom.insights.innerHTML = "";
   dom.previewTable.innerHTML = "";

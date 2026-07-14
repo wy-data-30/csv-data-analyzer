@@ -9,48 +9,111 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
+  <a class="skip-link" href="#mainContent">跳到主要内容</a>
   <header class="app-header">
-    <div>
-      <p class="eyebrow">Data Analysis Tool</p>
-      <h1>Smart CSV Analyzer</h1>
-      <p class="subtitle">上传 CSV，自动完成数据质量检查、统计分析和可视化。</p>
+    <div class="header-inner">
+      <a class="brand" href="#mainContent" aria-label="Smart CSV Analyzer 首页">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 40 40" role="img">
+            <rect x="10" y="9.5" width="20" height="21" rx="3" fill="none" stroke="currentColor" stroke-width="2.2"/>
+            <path d="M10 16.5h20M17 9.5v21M24 16.5v14" fill="none" stroke="currentColor" stroke-width="2.2"/>
+            <path d="m25.5 8 2.1 2.1L32 5.7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2"/>
+          </svg>
+        </span>
+        <span class="brand-copy">
+          <strong>Smart CSV Analyzer</strong>
+          <small>CSV 智能分析工作台</small>
+        </span>
+        <span class="version-badge">V1.0</span>
+      </a>
+      <div class="header-actions">
+        <span class="privacy-badge">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M10 2.5 16 5v4.4c0 3.8-2.4 6.6-6 8.1-3.6-1.5-6-4.3-6-8.1V5l6-2.5Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5"/>
+            <path d="m7.5 10 1.7 1.7 3.5-3.6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/>
+          </svg>
+          本地分析 · 数据不上云
+        </span>
+        <a class="header-cta" href="#dropZone">开始分析</a>
+      </div>
     </div>
   </header>
 
-  <main class="app-shell">
-    <section id="dropZone" class="upload-panel">
-      <div class="upload-copy">
-        <p class="section-kicker">Upload</p>
-        <h2>上传 CSV 开始分析</h2>
-        <p>支持拖拽上传，也可以选择本地文件。所有解析、统计和图表都在浏览器端完成。</p>
+  <main id="mainContent" class="app-shell">
+    <section class="hero-section" aria-labelledby="heroTitle">
+      <div class="hero-copy">
+        <p class="eyebrow"><span></span> Browser-based data workspace</p>
+        <h1 id="heroTitle">让每一份 CSV，<br><em>更快抵达结论。</em></h1>
+        <p class="subtitle">无需代码与复杂配置，上传文件即可获得字段识别、质量诊断、统计图表和场景化洞察。</p>
+        <div class="workflow-list" aria-label="分析流程">
+          <div><span>01</span><strong>导入数据</strong><small>支持多种中文编码</small></div>
+          <div><span>02</span><strong>自动识别</strong><small>字段、质量与异常</small></div>
+          <div><span>03</span><strong>生成洞察</strong><small>图表与分析结论</small></div>
+        </div>
       </div>
-      <div class="upload-actions">
-        <label class="encoding-control" for="fileEncoding">
-          文件编码
-          <select id="fileEncoding">
-            <option value="auto" selected>自动识别</option>
-            <option value="utf-8">UTF-8</option>
-            <option value="gbk">GBK</option>
-            <option value="gb18030">GB18030</option>
-          </select>
+
+      <section id="dropZone" class="upload-panel" aria-labelledby="uploadTitle">
+        <div class="drop-illustration" aria-hidden="true">
+          <svg viewBox="0 0 64 64">
+            <path d="M19 10h19l10 10v34H19a5 5 0 0 1-5-5V15a5 5 0 0 1 5-5Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="2.4"/>
+            <path d="M38 10v10h10M25 39l7-7 7 7M32 32v14" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4"/>
+          </svg>
+        </div>
+        <div class="upload-copy">
+          <p class="section-kicker">Upload workspace</p>
+          <h2 id="uploadTitle">拖放 CSV 文件到这里</h2>
+          <p>或从本地选择文件，解析过程仅在当前浏览器中完成。</p>
+        </div>
+        <label class="file-button" for="csvFile">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 13.8V3.5m0 0L6.4 7.1M10 3.5l3.6 3.6M4 12.5v2.3a1.7 1.7 0 0 0 1.7 1.7h8.6a1.7 1.7 0 0 0 1.7-1.7v-2.3" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"/></svg>
+          选择 CSV 文件
         </label>
-        <label class="file-button" for="csvFile">选择 CSV 文件</label>
         <input id="csvFile" type="file" accept=".csv,text/csv">
-        <button id="loadSample" type="button">加载示例数据</button>
-        <a class="secondary-button" href="sample-data.csv" download>下载示例数据</a>
-      </div>
-      <div class="upload-meta">
-        <span>支持表头行</span>
-        <span>支持 UTF-8 / GBK / GB18030</span>
-        <span>自动识别字段类型</span>
-        <span>无需后端</span>
-      </div>
+        <div class="upload-actions">
+          <label class="encoding-control" for="fileEncoding">
+            <span>文件编码</span>
+            <select id="fileEncoding">
+              <option value="auto" selected>自动识别</option>
+              <option value="utf-8">UTF-8</option>
+              <option value="gbk">GBK</option>
+              <option value="gb18030">GB18030</option>
+            </select>
+          </label>
+          <button id="loadSample" type="button">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.8 3.8h6.6l2.8 2.8v9.6H5.8a1.8 1.8 0 0 1-1.8-1.8V5.6a1.8 1.8 0 0 1 1.8-1.8Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5"/><path d="M12.4 3.8v2.8h2.8M7 10h5.3M7 13h4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/></svg>
+            加载示例
+          </button>
+          <a class="secondary-button" href="sample-data.csv" download>下载样例</a>
+        </div>
+        <div class="upload-meta">
+          <span>CSV / 表头行</span>
+          <span>UTF-8 / GBK / GB18030</span>
+          <span>自动字段识别</span>
+        </div>
+      </section>
     </section>
 
     <section id="statusPanel" class="status-panel hidden" aria-live="polite"></section>
 
-    <section id="results" class="results hidden">
-      <section class="section-block">
+    <section id="results" class="results hidden" aria-label="分析报告">
+      <aside class="results-nav" aria-label="报告目录">
+        <div class="results-nav-heading">
+          <span class="nav-status-dot" aria-hidden="true"></span>
+          <div><strong>分析报告</strong><small>已完成自动解析</small></div>
+        </div>
+        <nav>
+          <a class="active" href="#overviewSection"><span>01</span>数据概览</a>
+          <a href="#schemaSection"><span>02</span>字段识别</a>
+          <a href="#qualitySection"><span>03</span>数据质量</a>
+          <a href="#statisticsSection"><span>04</span>描述统计</a>
+          <a href="#chartsSection"><span>05</span>图表分析</a>
+          <a href="#customSection"><span>06</span>自定义分析</a>
+          <a href="#insightsSection"><span>07</span>分析结论</a>
+        </nav>
+        <a class="nav-new-analysis" href="#dropZone">＋ 分析新文件</a>
+      </aside>
+
+      <section id="overviewSection" class="section-block">
         <div class="section-heading">
           <div>
             <p class="section-kicker">Overview</p>
@@ -67,7 +130,7 @@
         </div>
       </section>
 
-      <section class="section-block">
+      <section id="schemaSection" class="section-block">
         <div class="section-heading">
           <div>
             <p class="section-kicker">Schema</p>
@@ -79,7 +142,7 @@
         </div>
       </section>
 
-      <section class="section-block">
+      <section id="qualitySection" class="section-block">
         <div class="section-heading">
           <div>
             <p class="section-kicker">Quality</p>
@@ -103,7 +166,7 @@
         </div>
       </section>
 
-      <section class="section-block">
+      <section id="statisticsSection" class="section-block">
         <div class="section-heading">
           <div>
             <p class="section-kicker">Statistics</p>
@@ -122,7 +185,7 @@
         </div>
       </section>
 
-      <section class="section-block">
+      <section id="chartsSection" class="section-block">
         <div class="section-heading">
           <div>
             <p class="section-kicker">Charts</p>
@@ -154,7 +217,7 @@
         </div>
       </section>
 
-      <section class="section-block">
+      <section id="customSection" class="section-block">
         <div class="section-heading">
           <div>
             <p class="section-kicker">Custom Analysis</p>
@@ -286,7 +349,7 @@
         </div>
       </section>
 
-      <section class="section-block">
+      <section id="insightsSection" class="section-block">
         <div class="section-heading">
           <div>
             <p class="section-kicker">Insights</p>
@@ -297,6 +360,11 @@
       </section>
     </section>
   </main>
+
+  <footer class="app-footer">
+    <p><strong>Smart CSV Analyzer</strong> · 轻量、私密、开箱即用的数据分析工具</p>
+    <p>所有数据仅在浏览器本地处理</p>
+  </footer>
 
   <script src="script.js"></script>
 </body>

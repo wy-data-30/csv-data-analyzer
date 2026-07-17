@@ -1,19 +1,23 @@
 # Smart CSV Analyzer
 
+**Current version:** V2.1
+
 **Live Demo:** [Open Smart CSV Analyzer](https://wy-data-30.github.io/csv-data-analyzer/)
 
 [中文说明](./README.zh-CN.md)
 
-Smart CSV Analyzer is a browser-based CSV analysis tool for quick exploration of structured CSV files. After a user uploads a CSV file, the application performs data preview, field type detection, data quality checks, descriptive statistics, chart generation, custom grouping analysis, and basic insight generation entirely in the browser.
+Smart CSV Analyzer is a browser-based CSV and Excel analysis tool for quick exploration of structured data files. After a user uploads a file, the application performs data preview, field type detection, data quality checks, descriptive statistics, chart generation, custom grouping analysis, and basic insight generation entirely in the browser.
 
 The project is built as a static website and does not require a backend service, database, account system, or build step.
 
 ## Features
 
 - Upload and parse CSV files in the browser.
+- Import `.xlsx` and `.xls` workbooks with SheetJS. Single-sheet files enter analysis directly; multi-sheet files show a worksheet selector first.
 - Select CSV file encoding manually, including Auto Detect, UTF-8, GBK, and GB18030.
 - Preview the first 10 rows of the dataset.
 - Automatically identify numeric, categorical, date, and ID fields.
+- Override inferred field types and automatically rebuild dependent analysis.
 - Generate a dataset overview, including row count, field count, field type counts, missing values, and duplicate rows.
 - Produce data quality reports for missing values, missing rates, duplicate rows, and numeric outliers.
 - Calculate descriptive statistics for numeric fields, including mean, median, minimum, maximum, and standard deviation.
@@ -22,6 +26,7 @@ The project is built as a static website and does not require a backend service,
 - Support custom analysis by selecting a numeric metric, a categorical grouping field, and an optional date field.
 - Provide scenario templates for general data, sales data, student scores, used product prices, surveys, and user behavior logs.
 - Generate cautious, data-based insights without assuming external business context.
+- Export a standalone HTML report or use browser printing to save a PDF.
 - Support responsive layouts for desktop and mobile screens.
 
 ## Tech Stack
@@ -31,6 +36,7 @@ The project is built as a static website and does not require a backend service,
 - Vanilla JavaScript
 - [PapaParse](https://www.papaparse.com/) for CSV parsing
 - [Chart.js](https://www.chartjs.org/) for data visualization
+- [SheetJS](https://sheetjs.com/) for Excel workbook parsing
 
 External libraries are loaded through CDN links in `index.html`.
 
@@ -81,15 +87,16 @@ Using a local static server is recommended because some browsers restrict `fetch
 ## Usage
 
 1. Open the application in a browser.
-2. Select the CSV file encoding if needed. Use Auto Detect by default, or choose GBK/GB18030 for CSV files exported from Chinese Windows Excel/WPS when Chinese text appears garbled.
-3. Upload a CSV file by selecting a file or dragging it into the upload area.
-4. Review the generated data overview, schema detection, quality report, statistics, charts, and insights.
-5. Use the field selectors to choose a metric, grouping field, and optional date field for custom analysis.
-6. Select a scenario template and map fields manually when the dataset fits a supported analysis scenario.
+2. For CSV files, select the encoding if needed. Use Auto Detect by default, or choose UTF-8, GBK, or GB18030 explicitly.
+3. Upload a `.csv`, `.xlsx`, or `.xls` file by selecting it or dragging it into the upload area.
+4. If an Excel workbook contains multiple worksheets, choose one and click **Analyze selected worksheet**. A single-sheet workbook enters analysis directly.
+5. Review the generated data overview, schema detection, quality report, statistics, charts, and insights.
+6. Use the field selectors to choose a metric, grouping field, and optional date field for custom analysis.
+7. Select a scenario template and map fields manually when the dataset fits a supported analysis scenario.
 
 The application does not require fixed column names. Template analysis is based on the fields selected by the user.
 
-If Chinese headers or category values are displayed incorrectly, try selecting `GBK` or `GB18030` before uploading the file. Another option is to reopen the file in Excel/WPS and export it as `CSV UTF-8`.
+The encoding selector applies to CSV files. If Chinese CSV headers or values are displayed incorrectly, try `GBK` or `GB18030`, or export the file as `CSV UTF-8` from Excel/WPS. Excel workbooks are decoded by SheetJS and preserve Chinese worksheet names, headers, and cell values.
 
 ## Sample Data
 
@@ -103,6 +110,8 @@ The repository includes sample CSV files for testing different analysis scenario
 - `sample-user-behavior.csv`: user behavior data for testing user IDs, events, channels, devices, and event time trends.
 
 The sample files use UTF-8 BOM encoding and include Chinese field names and values. They also contain a small number of missing values, duplicate rows, and outliers to help verify the data quality checks.
+
+`tests/fixtures/excel-import-test.xlsx` is a multi-sheet Excel fixture containing Chinese worksheet names and values, plus empty-sheet and missing-header cases for V2.1 regression testing.
 
 ## Supported Data Types
 
@@ -128,7 +137,7 @@ Field detection is heuristic. Users can override the analysis direction through 
 - Missing rate: calculated as missing values divided by total row count for each column.
 - Duplicate rows: detected by comparing normalized values across all fields in each row.
 - Numeric outliers: detected with the IQR method. Values below `Q1 - 1.5 * IQR` or above `Q3 + 1.5 * IQR` are marked as outliers.
-- Empty CSV handling: files without headers or valid data rows show a clear error message and do not keep stale analysis results on screen.
+- Empty input handling: CSV files and Excel worksheets without a usable header row or valid data rows show a clear error message and do not keep stale analysis results on screen.
 
 ## Charts
 
@@ -146,18 +155,19 @@ Field detection is heuristic. Users can override the analysis direction through 
 - Practical coverage of the common CSV exploration workflow: preview, schema detection, quality checks, statistics, visualization, and insights.
 - Built-in scenario templates for common structured datasets.
 - Responsive interface with scrollable tables and adaptive chart layouts.
-- Supports Chinese field names and values in CSV files.
+- Supports Chinese field names and values in CSV and Excel files.
 
 ## Privacy
 
-All CSV parsing and analysis run locally in the browser. The application does not upload CSV data to a server, store user files, or send dataset contents to a third-party API.
+All CSV and Excel parsing and analysis run locally in the browser. The application does not upload data files to a server, store user files, or send dataset contents to a third-party API.
 
-The page loads PapaParse and Chart.js from CDN providers. When the page loads these external scripts, the browser may request resources from the CDN host, but uploaded CSV contents remain local to the browser runtime.
+The page loads PapaParse, Chart.js, and SheetJS from CDN providers. When the page loads these external scripts, the browser may request resources from the CDN host, but uploaded data files remain local to the browser runtime.
 
 ## Known Limitations
 
-- Large CSV files are limited by browser memory and single-page runtime performance.
-- Date parsing depends on the browser's `Date` implementation; non-standard date formats may not be detected accurately.
+- Large CSV or Excel files are limited by browser memory and single-page runtime performance.
+- Date parsing uses strict format validation; ambiguous month/day formats require manual confirmation.
+- Excel analysis expects the first non-empty row of the selected worksheet to contain unique, non-empty text headers. Headerless, empty, protected, or structurally irregular worksheets may be rejected with an error.
 - Field type detection is based on heuristic rules and may require manual confirmation for ambiguous columns.
 - The project focuses on basic exploratory analysis and does not include advanced data cleaning, forecasting, or machine learning.
 - Analysis results are not persisted. Refreshing the page clears the current analysis.
@@ -167,7 +177,7 @@ The page loads PapaParse and Chart.js from CDN providers. When the page loads th
 
 - Add chunked parsing and progress indicators for large CSV files.
 - Improve encoding and delimiter detection.
-- Add export options for HTML, PDF, or image reports.
+- Add batch chart image export and richer report themes.
 - Add more chart types such as box plots, scatter plots, and stacked bar charts.
 - Support filtering, sorting, renaming fields, derived fields, and simple data cleaning operations.
 - Add saved analysis configurations.

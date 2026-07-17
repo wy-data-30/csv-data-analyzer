@@ -6,6 +6,10 @@ const state = {
   categoryStats: [],
   duplicateRows: 0,
   totalMissing: 0,
+  parseWarnings: [],
+  typeOverrides: {},
+  pendingExcel: null,
+  activeImportId: 0,
   charts: {}
 };
 
@@ -15,6 +19,11 @@ const dom = {
   loadSample: document.getElementById("loadSample"),
   dropZone: document.getElementById("dropZone"),
   statusPanel: document.getElementById("statusPanel"),
+  sheetSelectionPanel: document.getElementById("sheetSelectionPanel"),
+  excelWorkbookName: document.getElementById("excelWorkbookName"),
+  excelSheetSelect: document.getElementById("excelSheetSelect"),
+  confirmSheetSelection: document.getElementById("confirmSheetSelection"),
+  sheetSelectionMessage: document.getElementById("sheetSelectionMessage"),
   results: document.getElementById("results"),
   sourceName: document.getElementById("sourceName"),
   overviewCards: document.getElementById("overviewCards"),
@@ -53,7 +62,9 @@ const dom = {
   templateMainChartTitle: document.getElementById("templateMainChartTitle"),
   templateSecondaryChartTitle: document.getElementById("templateSecondaryChartTitle"),
   templateTrendCard: document.getElementById("templateTrendCard"),
-  templateTrendChartTitle: document.getElementById("templateTrendChartTitle")
+  templateTrendChartTitle: document.getElementById("templateTrendChartTitle"),
+  exportHtmlReport: document.getElementById("exportHtmlReport"),
+  printReport: document.getElementById("printReport")
 };
 
 const ENCODING_LABELS = {
@@ -61,6 +72,14 @@ const ENCODING_LABELS = {
   "utf-8": "UTF-8",
   gbk: "GBK",
   gb18030: "GB18030"
+};
+
+const FIELD_TYPE_LABELS = {
+  numeric: "数值字段",
+  category: "分类字段",
+  date: "日期字段",
+  id: "ID 字段",
+  ignore: "忽略字段"
 };
 
 const CHART_THEME = {
@@ -150,20 +169,21 @@ setupResultNavigation();
 
 dom.fileInput.addEventListener("change", (event) => {
   const file = event.target.files[0];
-  if (file) parseCsvFile(file);
+  if (file) parseDataFile(file);
   event.target.value = "";
 });
 
 dom.loadSample.addEventListener("click", async () => {
+  const importId = beginImport();
   try {
-    resetAnalysisState();
     setStatus("正在加载 sample-data.csv ...");
     const response = await fetch("sample-data.csv");
     if (!response.ok) throw new Error("示例数据加载失败");
     const text = await response.text();
-    parseCsvText(text, "sample-data.csv");
+    if (!isCurrentImport(importId)) return;
+    parseCsvText(text, "sample-data.csv", importId);
   } catch (error) {
-    showError(error.message);
+    showError(error.message, importId);
   }
 });
 
@@ -184,11 +204,7 @@ dom.loadSample.addEventListener("click", async () => {
 dom.dropZone.addEventListener("drop", (event) => {
   const file = event.dataTransfer.files[0];
   if (!file) return;
-  if (!file.name.toLowerCase().endsWith(".csv")) {
-    showError("请上传 CSV 文件。");
-    return;
-  }
-  parseCsvFile(file);
+  parseDataFile(file);
 });
 
 [
@@ -208,6 +224,19 @@ dom.scenarioTemplate.addEventListener("change", () => {
 });
 
 dom.runTemplateAnalysis.addEventListener("click", runTemplateAnalysis);
+dom.exportHtmlReport.addEventListener("click", exportHtmlReport);
+dom.printReport.addEventListener("click", () => window.print());
+dom.confirmSheetSelection.addEventListener("click", analyzeSelectedExcelSheet);
+dom.excelSheetSelect.addEventListener("change", () => {
+  dom.sheetSelectionMessage.className = "sheet-selection-message";
+  dom.sheetSelectionMessage.textContent = "";
+});
+
+dom.schemaTable.addEventListener("change", (event) => {
+  const select = event.target.closest("select[data-field-type]");
+  if (!select) return;
+  applyFieldTypeOverride(select.dataset.fieldType, select.value);
+});
 
 [dom.v2MetricField, dom.v2GroupField, dom.v2DateField].forEach((control) => {
   control.addEventListener("change", () => {
@@ -252,27 +281,236 @@ function setupResultNavigation() {
 }
 
 async function parseCsvFile(file) {
-  resetAnalysisState();
+  const importId = beginImport();
   try {
+    assertRuntimeDependency("Papa", "CSV 解析组件加载失败，请检查网络连接后刷新页面重试。");
     const selectedEncoding = dom.fileEncoding.value || "auto";
     setStatus(`正在读取 ${file.name} ...`);
     const buffer = await readFileAsArrayBuffer(file);
+    if (!isCurrentImport(importId)) return;
     const decoded = decodeCsvBuffer(buffer, selectedEncoding);
     setStatus(`正在解析 ${file.name}（${decoded.label}）...`);
-    parseCsvText(decoded.text, file.name);
+    parseCsvText(decoded.text, file.name, importId);
   } catch (error) {
-    showError(error.message);
+    showError(error.message, importId);
   }
 }
 
-function parseCsvText(text, sourceName) {
-  resetAnalysisState();
+function parseDataFile(file) {
+  if (/\.csv$/i.test(file.name)) return parseCsvFile(file);
+  if (/\.(xlsx|xls)$/i.test(file.name)) return parseExcelFile(file);
+  const importId = beginImport();
+  showError("不支持的文件格式。请上传 CSV、XLSX 或 XLS 文件。", importId);
+}
+
+async function parseExcelFile(file) {
+  const importId = beginImport();
+  try {
+    assertRuntimeDependency("XLSX", "Excel 解析组件加载失败，请检查网络连接后刷新页面重试。");
+    setStatus(`正在读取 ${file.name} ...`);
+    const buffer = await readFileAsArrayBuffer(file);
+    if (!isCurrentImport(importId)) return;
+    setStatus(`正在解析 ${file.name} ...`);
+    validateExcelFileSignature(buffer, file.name);
+    let workbook;
+    try {
+      workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+    } catch {
+      throw new Error("Excel 文件格式异常或文件已损坏，无法解析。请确认文件是有效的 XLSX 或 XLS 文件。");
+    }
+
+    const sheetNames = Array.isArray(workbook.SheetNames) ? workbook.SheetNames.filter(Boolean) : [];
+    if (!sheetNames.length) throw new Error("Excel 文件中没有可读取的工作表。");
+
+    if (sheetNames.length > 1) {
+      showExcelSheetSelection(workbook, file.name, sheetNames, importId);
+      return;
+    }
+
+    importExcelSheet(workbook, file.name, sheetNames[0], importId);
+  } catch (error) {
+    showError(error.message, importId);
+  }
+}
+
+function showExcelSheetSelection(workbook, fileName, sheetNames, importId) {
+  if (!isCurrentImport(importId)) return;
+  state.pendingExcel = { workbook, fileName, importId };
+  dom.excelWorkbookName.textContent = `${fileName} · 共 ${sheetNames.length} 个工作表`;
+  dom.excelSheetSelect.innerHTML = "";
+  sheetNames.forEach((sheetName) => {
+    const option = document.createElement("option");
+    option.value = sheetName;
+    option.textContent = sheetName;
+    dom.excelSheetSelect.appendChild(option);
+  });
+  dom.sheetSelectionMessage.className = "sheet-selection-message";
+  dom.sheetSelectionMessage.textContent = "请选择一个工作表，确认后再生成分析结果。";
+  dom.sheetSelectionPanel.classList.remove("hidden");
+  dom.statusPanel.className = "status-panel hidden";
+  dom.statusPanel.textContent = "";
+}
+
+function analyzeSelectedExcelSheet() {
+  const pending = state.pendingExcel;
+  if (!pending || !isCurrentImport(pending.importId)) {
+    showError("Excel 工作簿状态已失效，请重新上传文件。");
+    return;
+  }
+
+  const sheetName = dom.excelSheetSelect.value;
+  if (!sheetName) {
+    showSheetSelectionError("请选择一个工作表后再继续。");
+    return;
+  }
+
+  try {
+    importExcelSheet(pending.workbook, pending.fileName, sheetName, pending.importId);
+  } catch (error) {
+    showSheetSelectionError(error.message);
+  }
+}
+
+function importExcelSheet(workbook, fileName, sheetName, importId) {
+  if (!isCurrentImport(importId)) return;
+  const worksheet = workbook.Sheets?.[sheetName];
+  if (!worksheet || !worksheet["!ref"]) {
+    throw new Error(`工作表「${sheetName}」为空，请选择包含表头和数据的工作表。`);
+  }
+
+  const formattedRows = XLSX.utils.sheet_to_json(worksheet, {
+    header: 1,
+    defval: "",
+    raw: false,
+    blankrows: true,
+    dateNF: "yyyy-mm-dd"
+  });
+  const rawRows = XLSX.utils.sheet_to_json(worksheet, {
+    header: 1,
+    defval: "",
+    raw: true,
+    blankrows: true
+  });
+  const { fields, rows } = buildExcelTabularData(formattedRows, rawRows, sheetName);
+
+  state.pendingExcel = null;
+  dom.sheetSelectionPanel.classList.add("hidden");
+  setStatus(`正在分析 ${fileName} · ${sheetName} ...`);
+  commitTabularData(fields, rows, `${fileName} · ${sheetName}`, importId);
+}
+
+function buildExcelTabularData(formattedRows, rawRows, sheetName = "当前工作表") {
+  const rowCount = Math.max(formattedRows?.length || 0, rawRows?.length || 0);
+  const rowPairs = Array.from({ length: rowCount }, (_, index) => ({
+    formatted: Array.isArray(formattedRows?.[index]) ? formattedRows[index] : [],
+    raw: Array.isArray(rawRows?.[index]) ? rawRows[index] : []
+  }));
+
+  while (rowPairs.length && !excelRowHasValue(rowPairs[0].formatted) && !excelRowHasValue(rowPairs[0].raw)) {
+    rowPairs.shift();
+  }
+  while (rowPairs.length && !excelRowHasValue(rowPairs[rowPairs.length - 1].formatted) && !excelRowHasValue(rowPairs[rowPairs.length - 1].raw)) {
+    rowPairs.pop();
+  }
+
+  if (!rowPairs.length) {
+    throw new Error(`工作表「${sheetName}」为空，请选择包含表头和数据的工作表。`);
+  }
+
+  const headerPair = rowPairs[0];
+  const dataPairs = rowPairs.slice(1);
+  const maxColumns = rowPairs.reduce((max, pair) => Math.max(max, pair.formatted.length, pair.raw.length), 0);
+  const usedColumnIndexes = Array.from({ length: maxColumns }, (_, index) => index).filter((columnIndex) =>
+    !isMissing(headerPair.formatted[columnIndex])
+      || dataPairs.some((pair) => !isMissing(pair.formatted[columnIndex]) || !isMissing(pair.raw[columnIndex]))
+  );
+
+  if (!usedColumnIndexes.length) {
+    throw new Error(`工作表「${sheetName}」为空，请选择包含表头和数据的工作表。`);
+  }
+
+  const fields = usedColumnIndexes.map((columnIndex) => {
+    const formattedHeader = headerPair.formatted[columnIndex];
+    const rawHeader = headerPair.raw[columnIndex];
+    if (isMissing(formattedHeader)) {
+      throw new Error(`工作表「${sheetName}」的第 ${columnIndex + 1} 列缺少表头，请补充字段名后重新上传。`);
+    }
+    if (typeof rawHeader !== "string") {
+      throw new Error(`工作表「${sheetName}」未识别到有效文本表头；第 ${columnIndex + 1} 列首行不是字段名。`);
+    }
+    return normalizeFieldName(formattedHeader);
+  });
+
+  const duplicateFields = fields.filter((field, index) => fields.indexOf(field) !== index);
+  if (duplicateFields.length) {
+    throw new Error(`工作表「${sheetName}」包含重复表头「${duplicateFields[0]}」，请修改后重新上传。`);
+  }
+
+  const rows = dataPairs
+    .filter((pair) => usedColumnIndexes.some((columnIndex) => !isMissing(pair.formatted[columnIndex]) || !isMissing(pair.raw[columnIndex])))
+    .map((pair) => fields.reduce((row, field, fieldIndex) => {
+      const value = pair.formatted[usedColumnIndexes[fieldIndex]];
+      row[field] = value === null || value === undefined ? "" : String(value);
+      return row;
+    }, {}));
+
+  if (!rows.length) {
+    throw new Error(`工作表「${sheetName}」只有表头，没有可分析的数据行。`);
+  }
+
+  return { fields, rows };
+}
+
+function excelRowHasValue(row) {
+  return Array.isArray(row) && row.some((value) => !isMissing(value));
+}
+
+function validateExcelFileSignature(buffer, fileName) {
+  const bytes = new Uint8Array(buffer);
+  const isXlsx = /\.xlsx$/i.test(fileName);
+  const isXls = /\.xls$/i.test(fileName);
+  const hasZipSignature = bytes.length >= 4
+    && bytes[0] === 0x50
+    && bytes[1] === 0x4b
+    && [[0x03, 0x04], [0x05, 0x06], [0x07, 0x08]]
+      .some(([third, fourth]) => bytes[2] === third && bytes[3] === fourth);
+  const oleSignature = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
+  const hasOleSignature = bytes.length >= oleSignature.length
+    && oleSignature.every((value, index) => bytes[index] === value);
+
+  if ((isXlsx && !hasZipSignature) || (isXls && !hasOleSignature)) {
+    throw new Error("Excel 文件格式与扩展名不匹配或文件已损坏。请重新导出为有效的 XLSX 或 XLS 文件后再上传。");
+  }
+}
+
+function showSheetSelectionError(message) {
+  dom.sheetSelectionMessage.className = "sheet-selection-message error";
+  dom.sheetSelectionMessage.textContent = message;
+}
+
+function parseCsvText(text, sourceName, importId = beginImport()) {
+  if (!isCurrentImport(importId)) return;
+  assertRuntimeDependency("Papa", "CSV 解析组件加载失败，请检查网络连接后刷新页面重试。");
   Papa.parse(text, {
     header: true,
     skipEmptyLines: true,
-    complete: (results) => handleParsedData(results, sourceName),
-    error: (error) => showError(error.message)
+    complete: (results) => handleParsedData(results, sourceName, importId),
+    error: (error) => showError(error.message, importId)
   });
+}
+
+function beginImport() {
+  state.activeImportId += 1;
+  resetAnalysisState();
+  return state.activeImportId;
+}
+
+function isCurrentImport(importId) {
+  return importId === state.activeImportId;
+}
+
+function assertRuntimeDependency(globalName, message) {
+  if (!window[globalName]) throw new Error(message);
 }
 
 function readFileAsArrayBuffer(file) {
@@ -338,8 +576,20 @@ function decodeText(buffer, encoding, fatal = false) {
   }
 }
 
-function handleParsedData(results, sourceName) {
-  resetAnalysisState();
+function handleParsedData(results, sourceName, importId) {
+  if (!isCurrentImport(importId)) return;
+  const parseErrors = Array.isArray(results.errors) ? results.errors : [];
+  const fatalError = parseErrors.find((error) => error.type === "Delimiter" || error.code === "MissingQuotes");
+  if (fatalError) {
+    showError(`CSV 解析失败：${fatalError.message}`, importId);
+    return;
+  }
+
+  const parseWarnings = parseErrors.slice(0, 20).map((error) => ({
+    row: Number.isInteger(error.row) ? error.row + 2 : null,
+    code: error.code || "ParseWarning",
+    message: error.message || "CSV 行结构异常"
+  }));
   const fieldPairs = (results.meta.fields || [])
     .map((rawField) => ({
       raw: rawField,
@@ -355,12 +605,24 @@ function handleParsedData(results, sourceName) {
   );
 
   if (!fields.length || !rows.length) {
-    showError("CSV 中没有可分析的数据。请确认文件包含表头和至少一行数据。");
+    showError("CSV 中没有可分析的数据。请确认文件包含表头和至少一行数据。", importId);
+    return;
+  }
+
+  commitTabularData(fields, rows, sourceName, importId, parseWarnings);
+}
+
+function commitTabularData(fields, rows, sourceName, importId, parseWarnings = []) {
+  if (!isCurrentImport(importId)) return;
+  if (!fields.length || !rows.length) {
+    showError("文件中没有可分析的数据。请确认数据包含表头和至少一行数据。", importId);
     return;
   }
 
   state.rows = rows;
   state.fields = fields;
+  state.parseWarnings = parseWarnings;
+  state.pendingExcel = null;
   state.profiles = fields.map((field) => buildColumnProfile(field, rows));
   state.duplicateRows = countDuplicateRows(rows, fields);
   state.totalMissing = state.profiles.reduce((sum, profile) => sum + profile.missingCount, 0);
@@ -369,8 +631,15 @@ function handleParsedData(results, sourceName) {
 
   dom.sourceName.textContent = `已载入 · ${sourceName}`;
   dom.sourceName.title = sourceName;
+  dom.sheetSelectionPanel.classList.add("hidden");
   dom.results.classList.remove("hidden");
-  dom.statusPanel.className = "status-panel hidden";
+  if (state.parseWarnings.length) {
+    const affectedRows = new Set(state.parseWarnings.map((warning) => warning.row).filter(Boolean)).size;
+    setStatus(`CSV 已载入，但发现 ${state.parseWarnings.length} 个解析警告${affectedRows ? `，涉及 ${affectedRows} 行` : ""}。请核对数据预览和字段数量。`, "warning");
+  } else {
+    dom.statusPanel.className = "status-panel hidden";
+    dom.statusPanel.textContent = "";
+  }
 
   renderOverview();
   renderInsights();
@@ -398,9 +667,10 @@ function buildColumnProfile(field, rows) {
   const dateValues = nonMissingValues.map(toDate).filter(Boolean);
   const numericRatio = nonMissingCount ? numericValues.length / nonMissingCount : 0;
   const dateRatio = nonMissingCount ? dateValues.length / nonMissingCount : 0;
-  const lowerName = field.toLowerCase();
-  const idName = /(^|[_\-\s])(id|uuid|guid|code|key|number|no)([_\-\s]|$)/i.test(lowerName)
-    || /编号|编码|代码|订单号|账号|工号|主键/.test(field);
+  const idName = /(^|[_\-\s])(id|uuid|guid|code|key|number|no)([_\-\s]|$)/i.test(field)
+    || /(id|uuid|guid|code|key|number|no)$/i.test(field)
+    || /[a-z](Id|ID)$/.test(field)
+    || /编号|编码|代码|订单号|账号|工号|主键|用户ID|事件ID|会话ID/i.test(field);
 
   let type = "分类字段";
   let typeKey = "category";
@@ -420,6 +690,8 @@ function buildColumnProfile(field, rows) {
     field,
     type,
     typeKey,
+    inferredType: type,
+    inferredTypeKey: typeKey,
     total,
     nonMissingCount,
     missingCount: total - nonMissingCount,
@@ -561,7 +833,8 @@ function renderSchema() {
     <thead>
       <tr>
         <th>字段</th>
-        <th>识别类型</th>
+        <th>字段类型（可调整）</th>
+        <th>系统推断</th>
         <th>非空数量</th>
         <th>唯一值数量</th>
         <th>唯一率</th>
@@ -573,7 +846,14 @@ function renderSchema() {
       ${state.profiles.map((profile) => `
         <tr>
           <td>${escapeHtml(profile.field)}</td>
-          <td><span class="type-badge ${profile.typeKey}">${escapeHtml(profile.type)}</span></td>
+          <td>
+            <select class="schema-type-select" data-field-type="${escapeHtml(profile.field)}" aria-label="调整 ${escapeHtml(profile.field)} 的字段类型">
+              ${Object.entries(FIELD_TYPE_LABELS).map(([typeKey, label]) => `
+                <option value="${typeKey}"${profile.typeKey === typeKey ? " selected" : ""}>${escapeHtml(label)}</option>
+              `).join("")}
+            </select>
+          </td>
+          <td><span class="type-badge ${profile.inferredTypeKey}">${escapeHtml(profile.inferredType)}</span></td>
           <td>${formatInteger(profile.nonMissingCount)}</td>
           <td>${formatInteger(profile.uniqueCount)}</td>
           <td>${formatPercent(profile.uniqueRatio)}</td>
@@ -583,6 +863,35 @@ function renderSchema() {
       `).join("")}
     </tbody>
   `;
+}
+
+function applyFieldTypeOverride(field, typeKey) {
+  if (!Object.prototype.hasOwnProperty.call(FIELD_TYPE_LABELS, typeKey)) return;
+  const profile = state.profiles.find((item) => item.field === field);
+  if (!profile) return;
+
+  if (typeKey === profile.inferredTypeKey) delete state.typeOverrides[field];
+  else state.typeOverrides[field] = typeKey;
+
+  profile.typeKey = typeKey;
+  profile.type = FIELD_TYPE_LABELS[typeKey];
+  rebuildAnalysisFromProfiles();
+}
+
+function rebuildAnalysisFromProfiles() {
+  state.numericStats = buildNumericStats();
+  state.categoryStats = buildCategoryStats();
+  renderOverview();
+  renderInsights();
+  renderSchema();
+  renderQuality();
+  renderNumericStats();
+  renderCategoryStats();
+  populateControls();
+  renderCharts();
+  resetV2AnalysisState();
+  renderTemplateMappingForm();
+  resetTemplateResults("字段类型已更新。请重新选择分析字段或模板映射。");
 }
 
 function renderQuality() {
@@ -712,6 +1021,12 @@ function populateControls() {
 }
 
 function renderCharts() {
+  if (!window.Chart) {
+    ["numericDistributionChart", "categoryTopChart", "dateTrendChart", "customAnalysisChart"].forEach((id) => {
+      drawEmptyChart(document.getElementById(id), "图表组件加载失败，请检查网络连接");
+    });
+    return;
+  }
   renderNumericDistributionChart();
   renderCategoryTopChart();
   renderDateTrendChart();
@@ -934,6 +1249,7 @@ function buildV2AggregationTableHtml(groupField, metricField, rows, valueKey) {
 
 function renderV2TopGroupChart(metricField, groupField, grouped) {
   const canvas = document.getElementById("v2TopGroupChart");
+  if (!window.Chart) return drawEmptyChart(canvas, "图表组件加载失败，请检查网络连接");
   const topGroups = [...grouped].sort((a, b) => b.sum - a.sum).slice(0, 10);
   state.charts.v2TopGroupChart = new Chart(canvas, {
     type: "bar",
@@ -951,6 +1267,7 @@ function renderV2TopGroupChart(metricField, groupField, grouped) {
 
 function renderV2TrendChart(metricField, dateField) {
   const canvas = document.getElementById("v2SelectedTrendChart");
+  if (!window.Chart) return drawEmptyChart(canvas, "图表组件加载失败，请检查网络连接");
   const trend = buildMetricDateTrend(dateField, metricField);
   if (!trend.labels.length) {
     return drawEmptyChart(canvas, "所选时间字段没有可用的趋势数据");
@@ -1131,6 +1448,10 @@ function renderTemplateResult(result) {
 function renderTemplateChart(chartId, titleElement, chartConfig) {
   const canvas = document.getElementById(chartId);
   titleElement.textContent = chartConfig.title;
+  if (!window.Chart) {
+    drawEmptyChart(canvas, "图表组件加载失败，请检查网络连接");
+    return;
+  }
   if (!chartConfig.labels.length) {
     drawEmptyChart(canvas, "没有足够数据生成该图表");
     return;
@@ -1751,6 +2072,9 @@ function resetAnalysisState() {
   state.categoryStats = [];
   state.duplicateRows = 0;
   state.totalMissing = 0;
+  state.parseWarnings = [];
+  state.typeOverrides = {};
+  state.pendingExcel = null;
 
   dom.sourceName.textContent = "";
   dom.sourceName.removeAttribute("title");
@@ -1763,6 +2087,11 @@ function resetAnalysisState() {
   dom.outlierTable.innerHTML = "";
   dom.numericStatsTable.innerHTML = "";
   dom.categoryStats.innerHTML = "";
+  dom.excelWorkbookName.textContent = "";
+  dom.excelSheetSelect.innerHTML = "";
+  dom.sheetSelectionMessage.textContent = "";
+  dom.sheetSelectionMessage.className = "sheet-selection-message";
+  dom.sheetSelectionPanel.classList.add("hidden");
   dom.v2FieldPrompt.textContent = "";
   dom.v2FieldPrompt.className = "analysis-prompt";
   dom.v2SummaryCards.innerHTML = "";
@@ -1872,22 +2201,50 @@ function toNumber(value) {
   if (isMissing(value)) return null;
   const raw = String(value).trim();
   if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(raw)) return null;
-  const cleaned = raw.replace(/[$￥,\s]/g, "").replace(/%$/, "");
+  const isAccountingNegative = /^\(.*\)$/.test(raw);
+  const unsigned = isAccountingNegative ? raw.slice(1, -1) : raw;
+  const isPercent = /%$/.test(unsigned);
+  const cleaned = unsigned.replace(/[$￥¥€£,\s]/g, "").replace(/%$/, "");
   if (!/^[-+]?(?:\d+\.?\d*|\.\d+)$/.test(cleaned)) return null;
-  const parsed = Number(cleaned);
-  return Number.isFinite(parsed) ? parsed : null;
+  let parsed = Number(cleaned);
+  if (!Number.isFinite(parsed)) return null;
+  if (isAccountingNegative) parsed = -Math.abs(parsed);
+  if (isPercent) parsed /= 100;
+  return parsed;
 }
 
 function toDate(value) {
   if (isMissing(value)) return null;
   const raw = String(value).trim();
   if (/^[-+]?\d+(\.\d+)?$/.test(raw)) return null;
-  const looksLikeDate = /\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(raw)
-    || /\d{1,2}[-/]\d{1,2}[-/]\d{2,4}/.test(raw)
-    || /jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec/i.test(raw);
-  if (!looksLikeDate) return null;
+  const yearFirst = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T].*)?$/);
+  if (yearFirst) {
+    return buildUtcDate(Number(yearFirst[1]), Number(yearFirst[2]), Number(yearFirst[3]));
+  }
+
+  const dayOrMonthFirst = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:[ T].*)?$/);
+  if (dayOrMonthFirst) {
+    const first = Number(dayOrMonthFirst[1]);
+    const second = Number(dayOrMonthFirst[2]);
+    const year = Number(dayOrMonthFirst[3]);
+    if (first > 12) return buildUtcDate(year, second, first);
+    if (second > 12) return buildUtcDate(year, first, second);
+    return null;
+  }
+
+  if (!/jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec/i.test(raw)) return null;
   const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  if (Number.isNaN(parsed.getTime())) return null;
+  return buildUtcDate(parsed.getUTCFullYear(), parsed.getUTCMonth() + 1, parsed.getUTCDate());
+}
+
+function buildUtcDate(year, month, day) {
+  if (year < 1000 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) {
+    return null;
+  }
+  return parsed;
 }
 
 function mean(values) {
@@ -1937,6 +2294,96 @@ function formatPercent(value) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+async function exportHtmlReport() {
+  if (!state.rows.length) {
+    showError("请先上传数据并生成分析报告。");
+    return;
+  }
+
+  const button = dom.exportHtmlReport;
+  button.disabled = true;
+  const originalLabel = button.textContent;
+  button.textContent = "正在导出...";
+  try {
+    const report = dom.results.cloneNode(true);
+    report.classList.remove("hidden");
+    report.querySelectorAll(".report-actions, .nav-new-analysis").forEach((element) => element.remove());
+
+    const originalCanvases = Array.from(dom.results.querySelectorAll("canvas"));
+    const clonedCanvases = Array.from(report.querySelectorAll("canvas"));
+    clonedCanvases.forEach((canvas, index) => {
+      const image = document.createElement("img");
+      image.className = "exported-chart-image";
+      image.alt = canvas.getAttribute("aria-label") || "分析图表";
+      try {
+        image.src = originalCanvases[index].toDataURL("image/png");
+      } catch {
+        image.alt = "图表无法嵌入导出文件";
+      }
+      canvas.replaceWith(image);
+    });
+
+    report.querySelectorAll("select").forEach((select) => {
+      const value = document.createElement("span");
+      value.className = "exported-select-value";
+      value.textContent = select.options[select.selectedIndex]?.text || "未选择";
+      select.replaceWith(value);
+    });
+
+    let stylesheet = "";
+    try {
+      const response = await fetch("style.css");
+      if (response.ok) stylesheet = await response.text();
+    } catch {
+      stylesheet = "";
+    }
+
+    const sourceLabel = dom.sourceName.textContent.replace(/^已载入\s*·\s*/, "") || "data-report";
+    const safeTitle = escapeHtml(`Smart CSV Analyzer - ${sourceLabel}`);
+    const html = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${safeTitle}</title>
+  <style>${stylesheet}
+    body { padding: 24px; background: #f5f6fa; }
+    .results { display: block; max-width: 1240px; margin: 0 auto; }
+    .results-nav { position: static; }
+    .exported-chart-image { display: block; width: 100%; height: auto; }
+    .exported-select-value { font-weight: 650; }
+  </style>
+</head>
+<body>
+  ${report.outerHTML}
+  <footer class="app-footer"><p>导出时间：${escapeHtml(new Date().toLocaleString("zh-CN"))}</p></footer>
+</body>
+</html>`;
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${sanitizeFileName(sourceLabel)}-分析报告.html`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (error) {
+    setStatus(`报告导出失败：${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = originalLabel;
+  }
+}
+
+function sanitizeFileName(value) {
+  return String(value || "data-report")
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80) || "data-report";
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -1946,12 +2393,13 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function setStatus(message) {
-  dom.statusPanel.className = "status-panel";
+function setStatus(message, tone = "") {
+  dom.statusPanel.className = `status-panel${tone ? ` ${tone}` : ""}`;
   dom.statusPanel.textContent = message;
 }
 
-function showError(message) {
+function showError(message, importId = state.activeImportId) {
+  if (!isCurrentImport(importId)) return;
   resetAnalysisState();
   dom.statusPanel.className = "status-panel error";
   dom.statusPanel.textContent = message;

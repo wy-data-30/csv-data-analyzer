@@ -1,6 +1,6 @@
 # Smart CSV Analyzer
 
-**Current version:** V2.1
+**Current version:** V2.2
 
 **Live Demo:** [Open Smart CSV Analyzer](https://wy-data-30.github.io/csv-data-analyzer/)
 
@@ -16,11 +16,14 @@ The project is built as a static website and does not require a backend service,
 - Import `.xlsx` and `.xls` workbooks with SheetJS. Single-sheet files enter analysis directly; multi-sheet files show a worksheet selector first.
 - Select CSV file encoding manually, including Auto Detect, UTF-8, GBK, and GB18030.
 - Preview the first 10 rows of the dataset.
-- Automatically identify numeric, categorical, date, and ID fields.
-- Override inferred field types and automatically rebuild dependent analysis.
+- Automatically identify numeric, categorical, date, and ID fields, with semantic handling for student/record identifiers and year columns.
+- Review a field configuration table containing the field name, inferred type, non-empty count, unique count, and sample values.
+- Stage field type corrections as Numeric, Categorical, Date, ID, or Ignore, then apply them in one batch to rebuild statistics, trends, charts, and insights.
+- Report non-empty values that cannot be safely converted to the selected numeric or date type, while continuing with valid values.
+- Restore all fields to automatic detection at any time.
 - Generate a dataset overview, including row count, field count, field type counts, missing values, and duplicate rows.
 - Produce data quality reports for missing values, missing rates, duplicate rows, and numeric outliers.
-- Calculate descriptive statistics for numeric fields, including mean, median, minimum, maximum, and standard deviation.
+- Calculate descriptive statistics for numeric fields, including mean, median, minimum, maximum, and standard deviation. Columns consistently written with `%` keep decimal values internally but are displayed as percentages in statistics and charts.
 - Generate frequency statistics for categorical fields, including Top 10 categories and proportions.
 - Render charts for numeric distributions, categorical Top 10 values, and date trends.
 - Support custom analysis by selecting a numeric metric, a categorical grouping field, and an optional date field.
@@ -90,9 +93,11 @@ Using a local static server is recommended because some browsers restrict `fetch
 2. For CSV files, select the encoding if needed. Use Auto Detect by default, or choose UTF-8, GBK, or GB18030 explicitly.
 3. Upload a `.csv`, `.xlsx`, or `.xls` file by selecting it or dragging it into the upload area.
 4. If an Excel workbook contains multiple worksheets, choose one and click **Analyze selected worksheet**. A single-sheet workbook enters analysis directly.
-5. Review the generated data overview, schema detection, quality report, statistics, charts, and insights.
-6. Use the field selectors to choose a metric, grouping field, and optional date field for custom analysis.
-7. Select a scenario template and map fields manually when the dataset fits a supported analysis scenario.
+5. Review the field configuration table. Correct any type as Numeric, Categorical, Date, ID, or Ignore, then click **Apply field configuration**.
+6. Check the conversion failure count. Invalid non-empty numeric or date values are skipped from the corresponding analysis instead of stopping the import.
+7. Use **Restore automatic detection** to discard manual type corrections and rebuild the analysis from the inferred types.
+8. Review the generated data overview, quality report, statistics, charts, and insights.
+9. Use the field selectors or a scenario template for custom analysis.
 
 The application does not require fixed column names. Template analysis is based on the fields selected by the user.
 
@@ -111,25 +116,37 @@ The repository includes sample CSV files for testing different analysis scenario
 
 The sample files use UTF-8 BOM encoding and include Chinese field names and values. They also contain a small number of missing values, duplicate rows, and outliers to help verify the data quality checks.
 
-`tests/fixtures/excel-import-test.xlsx` is a multi-sheet Excel fixture containing Chinese worksheet names and values, plus empty-sheet and missing-header cases for V2.1 regression testing.
+`tests/fixtures/excel-import-test.xlsx` is a multi-sheet Excel regression fixture containing Chinese worksheet names and values, plus empty-sheet and missing-header cases.
+
+`tests/fixtures/field-inference-edge-cases.csv` covers common inference edge cases: numeric student IDs, semantic year columns, currency-formatted prices, percentages, mixed date formats, conflicting day/month formats, and high-uniqueness record numbers.
 
 ## Supported Data Types
 
 - Numeric fields: values such as amount, quantity, score, price, duration, and rate.
 - Categorical fields: values such as region, category, city, channel, device, gender, and subject.
-- Date fields: values that can be parsed by the browser as dates, such as `2025-01-01` or `2025-06-01 08:00:00`.
+- Date fields: strictly validated values such as `2025-01-01`, `2025年1月2日`, or `13/01/2025`. Semantic year columns such as `年份` are also treated as date fields and grouped by year.
 - ID fields: identifiers such as order IDs, user IDs, student IDs, event IDs, codes, and primary keys.
 
 ## Field Detection Rules
 
 For each column, the application calculates non-empty count, unique count, uniqueness ratio, numeric match ratio, and date match ratio. Field types are detected with the following heuristic rules:
 
-- ID field: the field name contains keywords such as `id`, `uuid`, `code`, `key`, `number`, `no`, `编号`, `编码`, `订单号`, `账号`, `工号`, or `主键`; or the column has a very high uniqueness ratio and is not primarily numeric or date-like.
-- Date field: at least 80% of non-empty values can be parsed as dates.
+- ID field: the field name contains keywords such as `id`, `uuid`, `code`, `key`, `number`, `no`, `编号`, `编码`, `订单号`, `账号`, `工号`, `学号`, `学籍号`, `考生号`, `准考证号`, `设备号`, or `主键`; or the column has a very high uniqueness ratio and is not primarily numeric or date-like. Numeric student/record numbers are therefore kept out of arithmetic statistics, while unrelated fields such as `学号数量` remain numeric.
+- Date field: at least 80% of non-empty values can be parsed by the strict date converter. Mixed year-first, Chinese year-month-day, and day-first/month-first values are supported when the column contains unambiguous evidence for the day/month order. If both orders conflict, only unambiguous cells are converted and ambiguous cells are counted as failures.
+- Semantic year field: names such as `年份`, `年度`, `学年`, `财年`, `入学年`, `毕业年`, or a corresponding English year token may use four-digit values from 1900 through 2200 and are grouped with `YYYY` labels. An unrelated four-digit numeric column is not promoted to a date merely because its values look like years.
 - Numeric field: at least 80% of non-empty values can be parsed as numbers.
+- Numeric formatting: currency symbols and thousands separators are removed for calculation. A column is displayed as a percentage only when all safely convertible non-empty numeric values use `%`; mixed percent and plain-decimal columns keep ordinary numeric formatting.
 - Categorical field: used as the default type when none of the rules above apply.
 
-Field detection is heuristic. Users can override the analysis direction through custom field selectors and scenario template mappings.
+Field detection is heuristic. Users can correct inferred types in the field configuration table before continuing with custom selectors or scenario template mappings.
+
+## Field Type Confirmation
+
+- Type selections are staged first and do not change the current analysis until **Apply field configuration** is clicked.
+- Applying a configuration rebuilds descriptive statistics, categorical frequencies, date trends, charts, field selectors, scenario mappings, and automatic insights through the same shared analysis pipeline.
+- Numeric and date conversions reuse the same strict converters as the analysis. Missing values are not conversion failures; non-empty invalid values are counted and skipped.
+- Ignored fields remain visible in the raw preview and data quality report, but are excluded from statistics, trends, charts, scenario mappings, and automatic insights.
+- Restoring automatic detection clears every manual override without reparsing the source file.
 
 ## Data Quality Rules
 
@@ -166,9 +183,10 @@ The page loads PapaParse, Chart.js, and SheetJS from CDN providers. When the pag
 ## Known Limitations
 
 - Large CSV or Excel files are limited by browser memory and single-page runtime performance.
-- Date parsing uses strict format validation; ambiguous month/day formats require manual confirmation.
+- Date parsing uses strict format validation. Ambiguous month/day cells require a consistent order inferred from other unambiguous cells in the same column; conflicting evidence leaves those ambiguous cells unconverted and reports them in the field configuration table.
 - Excel analysis expects the first non-empty row of the selected worksheet to contain unique, non-empty text headers. Headerless, empty, protected, or structurally irregular worksheets may be rejected with an error.
 - Field type detection is based on heuristic rules and may require manual confirmation for ambiguous columns.
+- A manually selected numeric or date type does not rewrite source values; values that fail strict conversion are excluded from that type's analysis and shown in the failure count.
 - The project focuses on basic exploratory analysis and does not include advanced data cleaning, forecasting, or machine learning.
 - Analysis results are not persisted. Refreshing the page clears the current analysis.
 - CDN dependencies require network access unless the libraries are downloaded and referenced locally.

@@ -621,6 +621,45 @@ select:disabled {
   line-height: 1.7;
 }
 
+.field-config-toolbar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-soft);
+}
+
+.field-config-message {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.field-config-message.warning {
+  color: #8a5a12;
+}
+
+.field-config-message.success {
+  color: var(--success);
+}
+
+.field-config-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.field-config-actions button {
+  min-height: 36px;
+  padding: 0 13px;
+  font-size: 12px;
+}
+
 .schema-type-select {
   min-width: 118px;
   padding: 7px 30px 7px 10px;
@@ -628,6 +667,24 @@ select:disabled {
   border-radius: 8px;
   background-color: #fff;
   font-size: 12px;
+}
+
+.schema-example {
+  display: block;
+  overflow: hidden;
+  max-width: 240px;
+  color: var(--muted-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversion-failure-count {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.conversion-failure-count.warning {
+  color: var(--danger);
 }
 
 .report-actions {
@@ -664,6 +721,7 @@ select:disabled {
   .sheet-selection-panel,
   .app-footer,
   .results-nav,
+  .field-config-actions,
   .report-actions,
   .nav-new-analysis {
     display: none !important;
@@ -1132,6 +1190,12 @@ tbody tr:hover {
 .type-badge.id {
   background: #fff5e8;
   color: #ad690e;
+}
+
+.type-badge.ignore {
+  background: #f4f4f6;
+  color: #8a8f9e;
+  text-decoration: line-through;
 }
 
 .category-grid {
@@ -1631,6 +1695,16 @@ label.file-button:focus-within {
   }
 
   .sheet-selection-controls button {
+    width: 100%;
+  }
+
+  .field-config-toolbar,
+  .field-config-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .field-config-actions button {
     width: 100%;
   }
 

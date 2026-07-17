@@ -25,7 +25,7 @@
           <strong>Smart CSV Analyzer</strong>
           <small>CSV 智能分析工作台</small>
         </span>
-        <span class="version-badge">V2.1</span>
+        <span class="version-badge">V2.2</span>
       </a>
       <div class="header-actions">
         <span class="privacy-badge">
@@ -120,7 +120,7 @@
         </div>
         <nav>
           <a class="active" href="#overviewSection"><span>01</span>数据概览</a>
-          <a href="#schemaSection"><span>02</span>字段识别</a>
+          <a href="#schemaSection"><span>02</span>字段配置</a>
           <a href="#qualitySection"><span>03</span>数据质量</a>
           <a href="#statisticsSection"><span>04</span>描述统计</a>
           <a href="#chartsSection"><span>05</span>图表分析</a>
@@ -155,12 +155,19 @@
         <div class="section-heading">
           <div>
             <p class="section-kicker">Schema</p>
-            <h2>字段类型识别</h2>
+            <h2>字段类型确认与修正</h2>
           </div>
         </div>
-        <p class="section-note">系统会自动推断字段类型；如识别不准确，可在下表中手动调整，相关统计和图表会立即重新计算。</p>
+        <p class="section-note">系统会自动推断字段类型。修改配置后点击“应用字段配置”，统计、图表和分析结论才会统一重新计算；无法安全转换的非空值会被跳过并计入失败数量。</p>
+        <div class="field-config-toolbar">
+          <p id="fieldConfigMessage" class="field-config-message" aria-live="polite"></p>
+          <div class="field-config-actions">
+            <button id="restoreAutoFieldTypes" class="secondary-button" type="button" disabled>恢复自动识别</button>
+            <button id="applyFieldConfig" type="button" disabled>应用字段配置</button>
+          </div>
+        </div>
         <div class="table-wrap">
-          <table id="schemaTable"></table>
+          <table id="schemaTable" aria-describedby="fieldConfigMessage"></table>
         </div>
       </section>
 

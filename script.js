@@ -8,6 +8,7 @@ const state = {
   totalMissing: 0,
   parseWarnings: [],
   typeOverrides: {},
+  fieldTypeDrafts: {},
   pendingExcel: null,
   activeImportId: 0,
   charts: {}
@@ -30,6 +31,9 @@ const dom = {
   insights: document.getElementById("insights"),
   previewTable: document.getElementById("previewTable"),
   schemaTable: document.getElementById("schemaTable"),
+  fieldConfigMessage: document.getElementById("fieldConfigMessage"),
+  applyFieldConfig: document.getElementById("applyFieldConfig"),
+  restoreAutoFieldTypes: document.getElementById("restoreAutoFieldTypes"),
   qualitySummary: document.getElementById("qualitySummary"),
   qualityTable: document.getElementById("qualityTable"),
   outlierTable: document.getElementById("outlierTable"),
@@ -75,12 +79,14 @@ const ENCODING_LABELS = {
 };
 
 const FIELD_TYPE_LABELS = {
-  numeric: "数值字段",
-  category: "分类字段",
-  date: "日期字段",
-  id: "ID 字段",
-  ignore: "忽略字段"
+  numeric: "数值",
+  category: "分类",
+  date: "日期",
+  id: "ID",
+  ignore: "忽略"
 };
+
+const DATE_TIME_SUFFIX_PATTERN = "(?:[ T](?:[01]?\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d{1,3})?)?(?:Z|[+-]\\d{2}:?\\d{2})?)?";
 
 const CHART_THEME = {
   primary: "#625bde",
@@ -225,7 +231,9 @@ dom.scenarioTemplate.addEventListener("change", () => {
 
 dom.runTemplateAnalysis.addEventListener("click", runTemplateAnalysis);
 dom.exportHtmlReport.addEventListener("click", exportHtmlReport);
-dom.printReport.addEventListener("click", () => window.print());
+dom.printReport.addEventListener("click", () => {
+  if (ensureFieldConfigurationApplied("打印或导出 PDF")) window.print();
+});
 dom.confirmSheetSelection.addEventListener("click", analyzeSelectedExcelSheet);
 dom.excelSheetSelect.addEventListener("change", () => {
   dom.sheetSelectionMessage.className = "sheet-selection-message";
@@ -235,8 +243,10 @@ dom.excelSheetSelect.addEventListener("change", () => {
 dom.schemaTable.addEventListener("change", (event) => {
   const select = event.target.closest("select[data-field-type]");
   if (!select) return;
-  applyFieldTypeOverride(select.dataset.fieldType, select.value);
+  stageFieldTypeChange(select.dataset.fieldType, select.value);
 });
+dom.applyFieldConfig.addEventListener("click", applyFieldConfiguration);
+dom.restoreAutoFieldTypes.addEventListener("click", restoreAutomaticFieldTypes);
 
 [dom.v2MetricField, dom.v2GroupField, dom.v2DateField].forEach((control) => {
   control.addEventListener("change", () => {
@@ -624,6 +634,10 @@ function commitTabularData(fields, rows, sourceName, importId, parseWarnings = [
   state.parseWarnings = parseWarnings;
   state.pendingExcel = null;
   state.profiles = fields.map((field) => buildColumnProfile(field, rows));
+  state.typeOverrides = {};
+  state.fieldTypeDrafts = Object.fromEntries(
+    state.profiles.map((profile) => [profile.field, profile.inferredTypeKey])
+  );
   state.duplicateRows = countDuplicateRows(rows, fields);
   state.totalMissing = state.profiles.reduce((sum, profile) => sum + profile.missingCount, 0);
   state.numericStats = buildNumericStats();
@@ -664,27 +678,37 @@ function buildColumnProfile(field, rows) {
   const uniqueCount = uniqueValues.size;
   const uniqueRatio = nonMissingCount ? uniqueCount / nonMissingCount : 0;
   const numericValues = nonMissingValues.map(toNumber).filter((value) => value !== null);
-  const dateValues = nonMissingValues.map(toDate).filter(Boolean);
+  const dateStrategy = buildDateStrategy(field, nonMissingValues);
+  const dateValues = nonMissingValues.map((value) => toDate(value, dateStrategy)).filter(Boolean);
   const numericRatio = nonMissingCount ? numericValues.length / nonMissingCount : 0;
   const dateRatio = nonMissingCount ? dateValues.length / nonMissingCount : 0;
-  const idName = /(^|[_\-\s])(id|uuid|guid|code|key|number|no)([_\-\s]|$)/i.test(field)
-    || /(id|uuid|guid|code|key|number|no)$/i.test(field)
-    || /[a-z](Id|ID)$/.test(field)
-    || /编号|编码|代码|订单号|账号|工号|主键|用户ID|事件ID|会话ID/i.test(field);
+  const idName = isIdFieldName(field);
 
-  let type = "分类字段";
   let typeKey = "category";
 
   if (idName || (uniqueRatio >= 0.98 && nonMissingCount >= 12 && numericRatio < 0.7 && dateRatio < 0.7)) {
-    type = "ID 字段";
     typeKey = "id";
   } else if (dateRatio >= 0.8) {
-    type = "日期字段";
     typeKey = "date";
   } else if (numericRatio >= 0.8) {
-    type = "数值字段";
     typeKey = "numeric";
   }
+
+  const type = FIELD_TYPE_LABELS[typeKey];
+  const conversionFailuresByType = {
+    numeric: nonMissingCount - numericValues.length,
+    date: nonMissingCount - dateValues.length
+  };
+  const numericFormat = detectNumericFormat(nonMissingValues);
+  const sampleValues = [];
+  const sampleKeys = new Set();
+  nonMissingValues.forEach((value) => {
+    const displayed = displayValue(value);
+    const key = normalizeValue(value);
+    if (sampleValues.length >= 3 || sampleKeys.has(key)) return;
+    sampleKeys.add(key);
+    sampleValues.push(displayed);
+  });
 
   return {
     field,
@@ -699,13 +723,39 @@ function buildColumnProfile(field, rows) {
     uniqueCount,
     uniqueRatio,
     numericRatio,
-    dateRatio
+    dateRatio,
+    dateStrategy,
+    numericFormat,
+    sampleValues,
+    conversionFailuresByType,
+    conversionFailureCount: conversionFailuresByType[typeKey] || 0
   };
 }
 
+function countConversionFailuresForValues(values, typeKey) {
+  if (typeKey !== "numeric" && typeKey !== "date") return 0;
+  const convert = typeKey === "numeric" ? toNumber : toDate;
+  return values.reduce((count, value) => (
+    count + (!isMissing(value) && convert(value) === null ? 1 : 0)
+  ), 0);
+}
+
+function countFieldConversionFailures(field, typeKey) {
+  if (typeKey !== "numeric" && typeKey !== "date") return 0;
+  const profile = getFieldProfile(field);
+  if (profile?.conversionFailuresByType) {
+    return profile.conversionFailuresByType[typeKey] || 0;
+  }
+  return countConversionFailuresForValues(
+    state.rows.map((row) => row[field]).filter((value) => !isMissing(value)),
+    typeKey
+  );
+}
+
 function buildNumericStats() {
-  return getProfilesByType("numeric").map((profile) => {
+  return getProfilesByType("numeric").flatMap((profile) => {
     const values = getNumericValues(profile.field);
+    if (!values.length) return [];
     const sorted = [...values].sort((a, b) => a - b);
     const avg = mean(values);
     const min = sorted[0];
@@ -717,7 +767,7 @@ function buildNumericStats() {
     const upperBound = q3 + 1.5 * iqr;
     const outliers = values.filter((value) => value < lowerBound || value > upperBound);
 
-    return {
+    return [{
       field: profile.field,
       count: values.length,
       mean: avg,
@@ -730,7 +780,7 @@ function buildNumericStats() {
       lowerBound,
       upperBound,
       outlierCount: outliers.length
-    };
+    }];
   });
 }
 
@@ -755,15 +805,19 @@ function buildCategoryStats() {
 }
 
 function renderOverview() {
+  const activeProfiles = getActiveProfiles();
   const numericCount = getProfilesByType("numeric").length;
   const categoryCount = getProfilesByType("category").length;
   const dateCount = getProfilesByType("date").length;
+  const ignoredCount = getProfilesByType("ignore").length;
   const cards = [
     ["总行数", state.rows.length],
     ["总字段数", state.fields.length],
+    ["参与分析字段数", activeProfiles.length],
     ["数值字段数量", numericCount],
     ["分类字段数量", categoryCount],
     ["日期字段数量", dateCount],
+    ["忽略字段数量", ignoredCount],
     ["缺失值总数", state.totalMissing],
     ["重复行数量", state.duplicateRows]
   ];
@@ -778,20 +832,36 @@ function renderOverview() {
 
 function renderInsights() {
   const insights = [];
-  const missingRate = state.rows.length && state.fields.length
-    ? state.totalMissing / (state.rows.length * state.fields.length)
+  const activeProfiles = getActiveProfiles();
+  const activeFields = activeProfiles.map((profile) => profile.field);
+  const ignoredCount = state.profiles.length - activeProfiles.length;
+  const activeMissing = activeProfiles.reduce((sum, profile) => sum + profile.missingCount, 0);
+  const analysisDuplicates = activeFields.length ? countDuplicateRows(state.rows, activeFields) : 0;
+  const missingRate = state.rows.length && activeFields.length
+    ? activeMissing / (state.rows.length * activeFields.length)
     : 0;
+
+  if (!activeFields.length) {
+    insights.push(`数据集包含 ${formatInteger(state.rows.length)} 行、${formatInteger(state.fields.length)} 个原始字段。`);
+    insights.push("所有字段均已设为忽略，因此未生成统计、图表或字段相关的自动结论。");
+    dom.insights.innerHTML = insights.map((text) => `
+      <div class="insight-item">${escapeHtml(text)}</div>
+    `).join("");
+    return;
+  }
+
   const topNumeric = state.numericStats
     .slice()
     .sort((a, b) => Math.abs(b.max - b.min) - Math.abs(a.max - a.min))[0];
   const firstCategory = state.categoryStats.find((item) => item.top.length);
-  const dateProfile = getProfilesByType("date")[0];
+  const dateProfile = getProfilesByType("date")
+    .find((profile) => fieldHasDateData(profile.field));
 
-  insights.push(`数据集包含 ${formatInteger(state.rows.length)} 行、${formatInteger(state.fields.length)} 个字段，其中数值字段 ${getProfilesByType("numeric").length} 个，分类字段 ${getProfilesByType("category").length} 个，日期字段 ${getProfilesByType("date").length} 个。`);
-  insights.push(`共发现 ${formatInteger(state.totalMissing)} 个缺失值，整体缺失率为 ${formatPercent(missingRate)}；重复行数量为 ${formatInteger(state.duplicateRows)}。`);
+  insights.push(`数据集包含 ${formatInteger(state.rows.length)} 行，当前有 ${formatInteger(activeFields.length)} 个字段参与分析${ignoredCount ? `，另有 ${formatInteger(ignoredCount)} 个字段已忽略` : ""}；其中数值字段 ${getProfilesByType("numeric").length} 个，分类字段 ${getProfilesByType("category").length} 个，日期字段 ${getProfilesByType("date").length} 个。`);
+  insights.push(`参与分析的字段共发现 ${formatInteger(activeMissing)} 个缺失值，缺失率为 ${formatPercent(missingRate)}；按参与分析字段计算的重复行数量为 ${formatInteger(analysisDuplicates)}。`);
 
   if (topNumeric) {
-    insights.push(`数值字段「${topNumeric.field}」的平均值为 ${formatNumber(topNumeric.mean)}，最低值为 ${formatNumber(topNumeric.min)}，最高值为 ${formatNumber(topNumeric.max)}。`);
+    insights.push(`数值字段「${topNumeric.field}」的平均值为 ${formatFieldNumber(topNumeric.field, topNumeric.mean)}，最低值为 ${formatFieldNumber(topNumeric.field, topNumeric.min)}，最高值为 ${formatFieldNumber(topNumeric.field, topNumeric.max)}。`);
   } else {
     insights.push("未识别到可用于统计的数值字段。");
   }
@@ -832,53 +902,165 @@ function renderSchema() {
   dom.schemaTable.innerHTML = `
     <thead>
       <tr>
-        <th>字段</th>
-        <th>字段类型（可调整）</th>
-        <th>系统推断</th>
-        <th>非空数量</th>
+        <th>字段名</th>
+        <th>自动识别类型</th>
+        <th>确认类型</th>
+        <th>非空值数量</th>
         <th>唯一值数量</th>
-        <th>唯一率</th>
-        <th>数值匹配率</th>
-        <th>日期匹配率</th>
+        <th>示例值</th>
+        <th>转换失败数量</th>
       </tr>
     </thead>
     <tbody>
-      ${state.profiles.map((profile) => `
-        <tr>
-          <td>${escapeHtml(profile.field)}</td>
-          <td>
-            <select class="schema-type-select" data-field-type="${escapeHtml(profile.field)}" aria-label="调整 ${escapeHtml(profile.field)} 的字段类型">
-              ${Object.entries(FIELD_TYPE_LABELS).map(([typeKey, label]) => `
-                <option value="${typeKey}"${profile.typeKey === typeKey ? " selected" : ""}>${escapeHtml(label)}</option>
-              `).join("")}
-            </select>
-          </td>
-          <td><span class="type-badge ${profile.inferredTypeKey}">${escapeHtml(profile.inferredType)}</span></td>
-          <td>${formatInteger(profile.nonMissingCount)}</td>
-          <td>${formatInteger(profile.uniqueCount)}</td>
-          <td>${formatPercent(profile.uniqueRatio)}</td>
-          <td>${formatPercent(profile.numericRatio)}</td>
-          <td>${formatPercent(profile.dateRatio)}</td>
-        </tr>
-      `).join("")}
+      ${state.profiles.map((profile) => {
+        const draftTypeKey = getDraftTypeKey(profile);
+        const failureCount = countFieldConversionFailures(profile.field, draftTypeKey);
+        const requiresConversion = draftTypeKey === "numeric" || draftTypeKey === "date";
+        const exampleText = profile.sampleValues.join("、") || "—";
+        const failureLabel = requiresConversion
+          ? `${profile.field} 转换失败 ${formatInteger(failureCount)} 个`
+          : `${profile.field} 当前类型无需转换`;
+        return `
+          <tr>
+            <td>${escapeHtml(profile.field)}</td>
+            <td><span class="type-badge ${profile.inferredTypeKey}">${escapeHtml(profile.inferredType)}</span></td>
+            <td>
+              <select class="schema-type-select" data-field-type="${escapeHtml(profile.field)}" aria-label="调整 ${escapeHtml(profile.field)} 的字段类型">
+                ${Object.entries(FIELD_TYPE_LABELS).map(([typeKey, label]) => `
+                  <option value="${typeKey}"${draftTypeKey === typeKey ? " selected" : ""}>${escapeHtml(label)}</option>
+                `).join("")}
+              </select>
+            </td>
+            <td>${formatInteger(profile.nonMissingCount)}</td>
+            <td>${formatInteger(profile.uniqueCount)}</td>
+            <td><span class="schema-example" title="${escapeHtml(exampleText)}">${escapeHtml(exampleText)}</span></td>
+            <td>
+              <span class="conversion-failure-count${failureCount ? " warning" : ""}" title="${requiresConversion ? "非空值中无法安全转换的数量" : "该类型不需要转换"}" aria-label="${escapeHtml(failureLabel)}">
+                ${requiresConversion ? formatInteger(failureCount) : "—"}
+              </span>
+            </td>
+          </tr>
+        `;
+      }).join("")}
     </tbody>
   `;
+  updateFieldConfigActions();
+  if (!dom.fieldConfigMessage.textContent) {
+    setFieldConfigMessage("自动识别已完成。可修改类型后统一应用。", "");
+  }
 }
 
-function applyFieldTypeOverride(field, typeKey) {
+function getDraftTypeKey(profile) {
+  return state.fieldTypeDrafts[profile.field] || profile.typeKey;
+}
+
+function stageFieldTypeChange(field, typeKey) {
   if (!Object.prototype.hasOwnProperty.call(FIELD_TYPE_LABELS, typeKey)) return;
   const profile = state.profiles.find((item) => item.field === field);
   if (!profile) return;
 
-  if (typeKey === profile.inferredTypeKey) delete state.typeOverrides[field];
-  else state.typeOverrides[field] = typeKey;
-
-  profile.typeKey = typeKey;
-  profile.type = FIELD_TYPE_LABELS[typeKey];
-  rebuildAnalysisFromProfiles();
+  state.fieldTypeDrafts[field] = typeKey;
+  updateSchemaDraftRow(field, typeKey);
+  updateFieldConfigActions();
+  if (!hasFieldConfigDraftChanges()) {
+    setFieldConfigMessage("当前选择与已应用的字段配置一致。", "");
+    return;
+  }
+  const totalFailures = state.profiles.reduce((sum, item) => (
+    sum + countFieldConversionFailures(item.field, getDraftTypeKey(item))
+  ), 0);
+  const failureText = totalFailures
+    ? `；当前配置预计有 ${formatInteger(totalFailures)} 个非空值无法安全转换，应用后会从对应统计中跳过`
+    : "";
+  setFieldConfigMessage(`字段配置有未应用的修改${failureText}。`, "warning");
 }
 
-function rebuildAnalysisFromProfiles() {
+function updateSchemaDraftRow(field, typeKey) {
+  const select = Array.from(dom.schemaTable.querySelectorAll("select[data-field-type]"))
+    .find((item) => item.dataset.fieldType === field);
+  if (!select) return;
+  select.value = typeKey;
+
+  const failureElement = select.closest("tr")?.querySelector(".conversion-failure-count");
+  if (!failureElement) return;
+  const failureCount = countFieldConversionFailures(field, typeKey);
+  const requiresConversion = typeKey === "numeric" || typeKey === "date";
+  failureElement.textContent = requiresConversion ? formatInteger(failureCount) : "—";
+  failureElement.classList.toggle("warning", failureCount > 0);
+  failureElement.title = requiresConversion
+    ? "非空值中无法安全转换的数量"
+    : "该类型不需要转换";
+  failureElement.setAttribute(
+    "aria-label",
+    requiresConversion
+      ? `${field} 转换失败 ${formatInteger(failureCount)} 个`
+      : `${field} 当前类型无需转换`
+  );
+}
+
+function applyFieldConfiguration() {
+  if (!state.rows.length) return;
+  state.typeOverrides = {};
+  state.profiles.forEach((profile) => {
+    const typeKey = getDraftTypeKey(profile);
+    profile.typeKey = typeKey;
+    profile.type = FIELD_TYPE_LABELS[typeKey];
+    profile.conversionFailureCount = countFieldConversionFailures(profile.field, typeKey);
+    if (typeKey !== profile.inferredTypeKey) state.typeOverrides[profile.field] = typeKey;
+  });
+  state.fieldTypeDrafts = Object.fromEntries(
+    state.profiles.map((profile) => [profile.field, profile.typeKey])
+  );
+
+  const failureCount = state.profiles.reduce((sum, profile) => sum + profile.conversionFailureCount, 0);
+  const message = failureCount
+    ? `字段配置已应用；${formatInteger(failureCount)} 个非空值转换失败，已从对应统计和图表中跳过。`
+    : "字段配置已应用，统计、图表和分析结论已重新计算。";
+  rebuildAnalysisFromProfiles(message);
+}
+
+function restoreAutomaticFieldTypes() {
+  if (!state.rows.length) return;
+  state.typeOverrides = {};
+  state.profiles.forEach((profile) => {
+    profile.typeKey = profile.inferredTypeKey;
+    profile.type = profile.inferredType;
+    profile.conversionFailureCount = countFieldConversionFailures(profile.field, profile.inferredTypeKey);
+  });
+  state.fieldTypeDrafts = Object.fromEntries(
+    state.profiles.map((profile) => [profile.field, profile.inferredTypeKey])
+  );
+  rebuildAnalysisFromProfiles("已恢复自动识别，统计、图表和分析结论已重新计算。");
+}
+
+function hasFieldConfigDraftChanges() {
+  return state.profiles.some((profile) => getDraftTypeKey(profile) !== profile.typeKey);
+}
+
+function hasAutomaticTypeDifferences() {
+  return state.profiles.some((profile) => (
+    profile.typeKey !== profile.inferredTypeKey
+      || getDraftTypeKey(profile) !== profile.inferredTypeKey
+  ));
+}
+
+function updateFieldConfigActions() {
+  dom.applyFieldConfig.disabled = !hasFieldConfigDraftChanges();
+  dom.restoreAutoFieldTypes.disabled = !hasAutomaticTypeDifferences();
+}
+
+function setFieldConfigMessage(message, tone = "") {
+  dom.fieldConfigMessage.className = `field-config-message${tone ? ` ${tone}` : ""}`;
+  dom.fieldConfigMessage.textContent = message;
+}
+
+function ensureFieldConfigurationApplied(actionLabel) {
+  if (!hasFieldConfigDraftChanges()) return true;
+  setFieldConfigMessage(`字段配置有未应用的修改。请先点击“应用字段配置”，再${actionLabel}。`, "warning");
+  return false;
+}
+
+function rebuildAnalysisFromProfiles(fieldConfigMessage = "字段配置已更新。") {
   state.numericStats = buildNumericStats();
   state.categoryStats = buildCategoryStats();
   renderOverview();
@@ -892,6 +1074,8 @@ function rebuildAnalysisFromProfiles() {
   resetV2AnalysisState();
   renderTemplateMappingForm();
   resetTemplateResults("字段类型已更新。请重新选择分析字段或模板映射。");
+  setFieldConfigMessage(fieldConfigMessage, "success");
+  updateFieldConfigActions();
 }
 
 function renderQuality() {
@@ -943,8 +1127,8 @@ function renderQuality() {
         <tr>
           <td>${escapeHtml(stat.field)}</td>
           <td>${formatInteger(stat.outlierCount)}</td>
-          <td>${formatNumber(stat.lowerBound)}</td>
-          <td>${formatNumber(stat.upperBound)}</td>
+          <td>${formatFieldNumber(stat.field, stat.lowerBound)}</td>
+          <td>${formatFieldNumber(stat.field, stat.upperBound)}</td>
         </tr>
       `).join("")}
     </tbody>
@@ -974,11 +1158,11 @@ function renderNumericStats() {
         <tr>
           <td>${escapeHtml(stat.field)}</td>
           <td>${formatInteger(stat.count)}</td>
-          <td>${formatNumber(stat.mean)}</td>
-          <td>${formatNumber(stat.median)}</td>
-          <td>${formatNumber(stat.max)}</td>
-          <td>${formatNumber(stat.min)}</td>
-          <td>${formatNumber(stat.std)}</td>
+          <td>${formatFieldNumber(stat.field, stat.mean)}</td>
+          <td>${formatFieldNumber(stat.field, stat.median)}</td>
+          <td>${formatFieldNumber(stat.field, stat.max)}</td>
+          <td>${formatFieldNumber(stat.field, stat.min)}</td>
+          <td>${formatFieldNumber(stat.field, stat.std)}</td>
         </tr>
       `).join("")}
     </tbody>
@@ -1006,9 +1190,11 @@ function renderCategoryStats() {
 }
 
 function populateControls() {
-  const numericProfiles = getProfilesByType("numeric");
+  const numericProfiles = getProfilesByType("numeric")
+    .filter((profile) => fieldHasNumericData(profile.field));
   const categoryProfiles = getProfilesByType("category");
-  const dateProfiles = getProfilesByType("date");
+  const dateProfiles = getProfilesByType("date")
+    .filter((profile) => fieldHasDateData(profile.field));
 
   setSelectOptions(dom.numericChartField, numericProfiles.map((profile) => profile.field));
   setSelectOptions(dom.categoryChartField, categoryProfiles.map((profile) => profile.field));
@@ -1040,7 +1226,8 @@ function renderNumericDistributionChart() {
   if (!field) return drawEmptyChart(canvas, "没有可用的数值字段");
 
   const values = getNumericValues(field);
-  const bins = buildHistogram(values, 10);
+  if (!values.length) return drawEmptyChart(canvas, "该字段没有可安全转换的有效数值");
+  const bins = buildHistogram(values, 10, field);
   state.charts.numericDistributionChart = new Chart(canvas, {
     type: "bar",
     data: {
@@ -1084,8 +1271,10 @@ function renderDateTrendChart() {
   destroyChart("dateTrendChart");
   if (!field) return drawEmptyChart(canvas, "没有可用的日期字段");
 
-  const numericField = dom.metricField.value || getProfilesByType("numeric")[0]?.field;
+  const numericField = dom.metricField.value || getProfilesByType("numeric")
+    .find((profile) => fieldHasNumericData(profile.field))?.field;
   const trend = buildDateTrend(field, numericField);
+  if (!trend.labels.length) return drawEmptyChart(canvas, "该字段没有可安全转换的有效日期");
   state.charts.dateTrendChart = new Chart(canvas, {
     type: "line",
     data: {
@@ -1099,7 +1288,7 @@ function renderDateTrendChart() {
         fill: true
       }]
     },
-    options: chartOptions(trend.axisLabel)
+    options: chartOptions(numericAxisLabel(numericField, trend.axisLabel), numericField)
   });
 }
 
@@ -1126,7 +1315,7 @@ function renderCustomAnalysisChart() {
         backgroundColor: CHART_THEME.warning
       }]
     },
-    options: chartOptions(methodLabel)
+    options: chartOptions(numericAxisLabel(metric, methodLabel), metric)
   });
 }
 
@@ -1240,7 +1429,7 @@ function buildV2AggregationTableHtml(groupField, metricField, rows, valueKey) {
         <tr>
           <td>${escapeHtml(row.name)}</td>
           <td>${formatInteger(row.count)}</td>
-          <td>${formatNumber(row[valueKey])}</td>
+          <td>${formatFieldNumber(metricField, row[valueKey])}</td>
         </tr>
       `).join("")}
     </tbody>
@@ -1261,7 +1450,7 @@ function renderV2TopGroupChart(metricField, groupField, grouped) {
         backgroundColor: CHART_THEME.primary
       }]
     },
-    options: chartOptions("求和值")
+    options: chartOptions(numericAxisLabel(metricField, "求和值"), metricField)
   });
 }
 
@@ -1278,7 +1467,7 @@ function renderV2TrendChart(metricField, dateField) {
     data: {
       labels: trend.labels,
       datasets: [{
-        label: `${metricField} 按时间求和趋势`,
+        label: `${metricField} 按${getDateGranularity(dateField) === "year" ? "年份" : "时间"}求和趋势`,
         data: trend.values,
         borderColor: CHART_THEME.secondary,
         backgroundColor: CHART_THEME.secondaryFill,
@@ -1286,14 +1475,14 @@ function renderV2TrendChart(metricField, dateField) {
         fill: true
       }]
     },
-    options: chartOptions("求和值")
+    options: chartOptions(numericAxisLabel(metricField, "求和值"), metricField)
   });
 }
 
 function buildMetricDateTrend(dateField, metricField) {
   const items = [];
   state.rows.forEach((row) => {
-    const date = toDate(row[dateField]);
+    const date = parseFieldDate(dateField, row[dateField]);
     const value = toNumber(row[metricField]);
     if (!date || value === null) return;
     items.push({ date, value });
@@ -1309,9 +1498,7 @@ function buildMetricDateTrend(dateField, metricField) {
   const groups = new Map();
 
   items.forEach((item) => {
-    const key = groupByMonth
-      ? `${item.date.getFullYear()}-${String(item.date.getMonth() + 1).padStart(2, "0")}`
-      : item.date.toISOString().slice(0, 10);
+    const key = getDateTrendKey(dateField, item.date, groupByMonth);
     groups.set(key, (groups.get(key) || 0) + item.value);
   });
 
@@ -1340,11 +1527,13 @@ function renderTemplateMappingForm() {
 
 function buildTemplateFieldOptions(fieldConfig) {
   const placeholder = fieldConfig.required ? "请选择字段" : "不选择";
-  const options = state.fields.map((field) => {
-    const profile = state.profiles.find((item) => item.field === field);
-    const typeLabel = profile ? profile.type : "未识别类型";
-    return `<option value="${escapeHtml(field)}">${escapeHtml(field)}（${escapeHtml(typeLabel)}）</option>`;
-  }).join("");
+  const options = getActiveProfiles()
+    .filter((profile) => fieldConfig.expected === "any" || profile.typeKey === fieldConfig.expected)
+    .filter((profile) => fieldConfig.expected !== "numeric" || fieldHasNumericData(profile.field))
+    .filter((profile) => fieldConfig.expected !== "date" || fieldHasDateData(profile.field))
+    .map((profile) => {
+      return `<option value="${escapeHtml(profile.field)}">${escapeHtml(profile.field)}（${escapeHtml(profile.type)}）</option>`;
+    }).join("");
   return `<option value="">${placeholder}</option>${options}`;
 }
 
@@ -1402,6 +1591,13 @@ function validateTemplateMappings(template, mappings) {
       return `请为「${field.label.replace("（可选）", "")}」选择字段。`;
     }
     if (!selected) continue;
+    const profile = getFieldProfile(selected);
+    if (!profile || profile.typeKey === "ignore") {
+      return `字段「${selected}」已被忽略或不再可用，请重新选择字段。`;
+    }
+    if (field.expected !== "any" && profile.typeKey !== field.expected) {
+      return `字段「${selected}」当前配置为「${profile.type}」，与「${field.label}」要求的类型不匹配。`;
+    }
     if (field.expected === "numeric" && !fieldHasNumericData(selected)) {
       return `字段「${selected}」无法解析出有效数值，请为「${field.label}」选择数值字段。`;
     }
@@ -1470,7 +1666,10 @@ function renderTemplateChart(chartId, titleElement, chartConfig) {
         fill: chartConfig.type === "line"
       }]
     },
-    options: chartOptions(chartConfig.axisLabel || "值")
+    options: chartOptions(
+      numericAxisLabel(chartConfig.valueField, chartConfig.axisLabel || "值"),
+      chartConfig.valueField
+    )
   });
 }
 
@@ -1483,9 +1682,9 @@ function analyzeGenericTemplate(mappings) {
   const trend = mappings.date ? buildTrendFromRows(mappings.date, (row) => toNumber(row[mappings.metric]), "sum") : null;
   const insights = [
     `本次通用分析使用「${mappings.metric}」作为数值指标、「${mappings.group}」作为分组维度，有效数值记录为 ${formatInteger(values.length)} 条。`,
-    `「${mappings.metric}」的平均值为 ${formatNumber(stats.mean)}，中位数为 ${formatNumber(stats.median)}，最小值为 ${formatNumber(stats.min)}，最大值为 ${formatNumber(stats.max)}。`,
-    topBySum ? `按「${mappings.group}」分组求和最高的是「${topBySum.name}」，求和值为 ${formatNumber(topBySum.sum)}。` : "所选字段没有形成可比较的分组结果。",
-    topByAvg ? `按「${mappings.group}」分组平均值最高的是「${topByAvg.name}」，平均值为 ${formatNumber(topByAvg.avg)}。该结果只描述数据差异，不说明原因。` : "所选字段没有形成平均值比较结果。"
+    `「${mappings.metric}」的平均值为 ${formatFieldNumber(mappings.metric, stats.mean)}，中位数为 ${formatFieldNumber(mappings.metric, stats.median)}，最小值为 ${formatFieldNumber(mappings.metric, stats.min)}，最大值为 ${formatFieldNumber(mappings.metric, stats.max)}。`,
+    topBySum ? `按「${mappings.group}」分组求和最高的是「${topBySum.name}」，求和值为 ${formatFieldNumber(mappings.metric, topBySum.sum)}。` : "所选字段没有形成可比较的分组结果。",
+    topByAvg ? `按「${mappings.group}」分组平均值最高的是「${topByAvg.name}」，平均值为 ${formatFieldNumber(mappings.metric, topByAvg.avg)}。该结果只描述数据差异，不说明原因。` : "所选字段没有形成平均值比较结果。"
   ];
   if (trend) insights.push(buildTrendFactText(mappings.metric, mappings.date, trend, "求和值"));
 
@@ -1499,9 +1698,9 @@ function analyzeGenericTemplate(mappings) {
     ],
     insights,
     table: numericGroupTable(mappings.group, mappings.metric, grouped),
-    mainChart: barChartConfig(`按 ${mappings.group} 的 ${mappings.metric} 求和 Top 10`, grouped.slice(0, 10).map((item) => item.name), grouped.slice(0, 10).map((item) => item.sum), `${mappings.metric} 求和`, "求和值", CHART_THEME.primary),
-    secondaryChart: histogramChartConfig(`${mappings.metric} 分布`, values, "记录数"),
-    trendChart: trend ? lineChartConfig(`${mappings.metric} 时间趋势`, trend.labels, trend.values, `${mappings.metric} 求和`, "求和值") : null
+    mainChart: barChartConfig(`按 ${mappings.group} 的 ${mappings.metric} 求和 Top 10`, grouped.slice(0, 10).map((item) => item.name), grouped.slice(0, 10).map((item) => item.sum), `${mappings.metric} 求和`, "求和值", CHART_THEME.primary, mappings.metric),
+    secondaryChart: histogramChartConfig(`${mappings.metric} 分布`, values, "记录数", mappings.metric),
+    trendChart: trend ? lineChartConfig(`${mappings.metric} 时间趋势`, trend.labels, trend.values, `${mappings.metric} 求和`, "求和值", mappings.metric) : null
   };
 }
 
@@ -1514,6 +1713,7 @@ function analyzeSalesTemplate(mappings) {
     ? groupMetricRowsByField(metricRows, mappings.region)
     : frequencyRows(mappings.region);
   const metricLabel = metricRows ? metricRows.label : "记录数";
+  const metricFormatField = metricRows?.formatField || "";
   const categoryTop = categoryRows[0];
   const regionTop = regionRows[0];
   const trend = mappings.date
@@ -1525,8 +1725,8 @@ function analyzeSalesTemplate(mappings) {
     metricRows
       ? `销售数值基于「${metricLabel}」计算，有效数值记录为 ${formatInteger(metricRows.length)} 条。`
       : "未选择可计算的销售数值字段，因此仅按记录数做分组统计。",
-    categoryTop ? `按品类字段「${mappings.category}」比较，${metricRows ? "求和" : "记录数"}最高的分组是「${categoryTop.name}」，值为 ${formatNumber(categoryTop.sum ?? categoryTop.count)}。` : "品类字段没有可统计的有效分组。",
-    regionTop ? `按地区字段「${mappings.region}」比较，${metricRows ? "求和" : "记录数"}最高的分组是「${regionTop.name}」，值为 ${formatNumber(regionTop.sum ?? regionTop.count)}。该结果只反映 CSV 中的数据事实。` : "地区字段没有可统计的有效分组。"
+    categoryTop ? `按品类字段「${mappings.category}」比较，${metricRows ? "求和" : "记录数"}最高的分组是「${categoryTop.name}」，值为 ${metricRows ? formatFieldNumber(metricFormatField, categoryTop.sum) : formatNumber(categoryTop.count)}。` : "品类字段没有可统计的有效分组。",
+    regionTop ? `按地区字段「${mappings.region}」比较，${metricRows ? "求和" : "记录数"}最高的分组是「${regionTop.name}」，值为 ${metricRows ? formatFieldNumber(metricFormatField, regionTop.sum) : formatNumber(regionTop.count)}。该结果只反映 CSV 中的数据事实。` : "地区字段没有可统计的有效分组。"
   ];
   if (trend) insights.push(buildTrendFactText(metricLabel, mappings.date, trend, metricRows ? "求和值" : "记录数"));
 
@@ -1540,11 +1740,11 @@ function analyzeSalesTemplate(mappings) {
     ],
     insights,
     table: metricRows
-      ? numericGroupTable(mappings.category, metricLabel, categoryRows)
+      ? numericGroupTable(mappings.category, metricLabel, categoryRows, metricFormatField)
       : frequencyTable(mappings.category, categoryRows),
-    mainChart: barChartConfig(`按 ${mappings.category} 的 ${metricLabel} Top 10`, topLabels(categoryRows), topValues(categoryRows, metricRows ? "sum" : "count"), metricRows ? `${metricLabel} 求和` : "记录数", metricRows ? "求和值" : "记录数", CHART_THEME.primary),
-    secondaryChart: barChartConfig(`按 ${mappings.region} 的 ${metricLabel} Top 10`, topLabels(regionRows), topValues(regionRows, metricRows ? "sum" : "count"), metricRows ? `${metricLabel} 求和` : "记录数", metricRows ? "求和值" : "记录数", CHART_THEME.secondary),
-    trendChart: trend ? lineChartConfig(`${metricLabel} 时间趋势`, trend.labels, trend.values, metricRows ? `${metricLabel} 求和` : "记录数", metricRows ? "求和值" : "记录数") : null
+    mainChart: barChartConfig(`按 ${mappings.category} 的 ${metricLabel} Top 10`, topLabels(categoryRows), topValues(categoryRows, metricRows ? "sum" : "count"), metricRows ? `${metricLabel} 求和` : "记录数", metricRows ? "求和值" : "记录数", CHART_THEME.primary, metricFormatField),
+    secondaryChart: barChartConfig(`按 ${mappings.region} 的 ${metricLabel} Top 10`, topLabels(regionRows), topValues(regionRows, metricRows ? "sum" : "count"), metricRows ? `${metricLabel} 求和` : "记录数", metricRows ? "求和值" : "记录数", CHART_THEME.secondary, metricFormatField),
+    trendChart: trend ? lineChartConfig(`${metricLabel} 时间趋势`, trend.labels, trend.values, metricRows ? `${metricLabel} 求和` : "记录数", metricRows ? "求和值" : "记录数", metricFormatField) : null
   };
 }
 
@@ -1558,8 +1758,8 @@ function analyzeScoreTemplate(mappings) {
   const trend = mappings.examDate ? buildTrendFromRows(mappings.examDate, (row) => toNumber(row[mappings.score]), "avg") : null;
   const insights = [
     `成绩模板使用「${mappings.score}」作为成绩字段，有效成绩记录为 ${formatInteger(values.length)} 条。`,
-    `成绩平均值为 ${formatNumber(stats.mean)}，中位数为 ${formatNumber(stats.median)}，最低值为 ${formatNumber(stats.min)}，最高值为 ${formatNumber(stats.max)}。`,
-    topAvg && lowAvg ? `按「${dimension}」分组时，平均值最高的是「${topAvg.name}」(${formatNumber(topAvg.avg)})，平均值最低的是「${lowAvg.name}」(${formatNumber(lowAvg.avg)})。这里只描述字段结果，不评价教学或个体原因。` : "未选择班级或科目字段，因此未生成分组平均值比较。"
+    `成绩平均值为 ${formatFieldNumber(mappings.score, stats.mean)}，中位数为 ${formatFieldNumber(mappings.score, stats.median)}，最低值为 ${formatFieldNumber(mappings.score, stats.min)}，最高值为 ${formatFieldNumber(mappings.score, stats.max)}。`,
+    topAvg && lowAvg ? `按「${dimension}」分组时，平均值最高的是「${topAvg.name}」(${formatFieldNumber(mappings.score, topAvg.avg)})，平均值最低的是「${lowAvg.name}」(${formatFieldNumber(mappings.score, lowAvg.avg)})。这里只描述字段结果，不评价教学或个体原因。` : "未选择班级或科目字段，因此未生成分组平均值比较。"
   ];
   if (trend) insights.push(buildTrendFactText(mappings.score, mappings.examDate, trend, "平均值"));
 
@@ -1569,15 +1769,15 @@ function analyzeScoreTemplate(mappings) {
       ["模板", "成绩数据分析"],
       ["成绩字段", mappings.score],
       ["有效成绩", formatInteger(values.length)],
-      ["平均值", formatNumber(stats.mean)]
+      ["平均值", formatFieldNumber(mappings.score, stats.mean)]
     ],
     insights,
     table: dimension ? numericGroupTable(dimension, mappings.score, grouped) : simpleStatsTable(mappings.score, stats, values.length),
     mainChart: dimension
-      ? barChartConfig(`按 ${dimension} 的成绩平均值 Top 10`, topLabels(grouped, "avg"), topValues(grouped, "avg"), "成绩平均值", "平均值", CHART_THEME.primary)
-      : histogramChartConfig(`${mappings.score} 分布`, values, "记录数"),
-    secondaryChart: histogramChartConfig(`${mappings.score} 分布`, values, "记录数"),
-    trendChart: trend ? lineChartConfig(`${mappings.score} 时间趋势`, trend.labels, trend.values, "成绩平均值", "平均值") : null
+      ? barChartConfig(`按 ${dimension} 的成绩平均值 Top 10`, topLabels(grouped, "avg"), topValues(grouped, "avg"), "成绩平均值", "平均值", CHART_THEME.primary, mappings.score)
+      : histogramChartConfig(`${mappings.score} 分布`, values, "记录数", mappings.score),
+    secondaryChart: histogramChartConfig(`${mappings.score} 分布`, values, "记录数", mappings.score),
+    trendChart: trend ? lineChartConfig(`${mappings.score} 时间趋势`, trend.labels, trend.values, "成绩平均值", "平均值", mappings.score) : null
   };
 }
 
@@ -1591,8 +1791,8 @@ function analyzeUsedGoodsTemplate(mappings) {
   const trend = mappings.date ? buildTrendFromRows(mappings.date, (row) => toNumber(row[mappings.price]), "avg") : null;
   const insights = [
     `二手商品价格模板使用「${mappings.price}」作为价格字段，有效价格记录为 ${formatInteger(values.length)} 条。`,
-    `价格平均值为 ${formatNumber(stats.mean)}，中位数为 ${formatNumber(stats.median)}，最低值为 ${formatNumber(stats.min)}，最高值为 ${formatNumber(stats.max)}。`,
-    topAvg ? `按「${primaryDimension}」比较，平均价格最高的分组是「${topAvg.name}」，平均值为 ${formatNumber(topAvg.avg)}。该结果只说明样本中的价格差异，不代表市场整体水平。` : "未选择商品、平台、城市或成色字段，因此仅生成价格整体统计。"
+    `价格平均值为 ${formatFieldNumber(mappings.price, stats.mean)}，中位数为 ${formatFieldNumber(mappings.price, stats.median)}，最低值为 ${formatFieldNumber(mappings.price, stats.min)}，最高值为 ${formatFieldNumber(mappings.price, stats.max)}。`,
+    topAvg ? `按「${primaryDimension}」比较，平均价格最高的分组是「${topAvg.name}」，平均值为 ${formatFieldNumber(mappings.price, topAvg.avg)}。该结果只说明样本中的价格差异，不代表市场整体水平。` : "未选择商品、平台、城市或成色字段，因此仅生成价格整体统计。"
   ];
   if (trend) insights.push(buildTrendFactText(mappings.price, mappings.date, trend, "平均值"));
 
@@ -1602,15 +1802,15 @@ function analyzeUsedGoodsTemplate(mappings) {
       ["模板", "二手商品价格分析"],
       ["价格字段", mappings.price],
       ["比较维度", primaryDimension || "未选择"],
-      ["价格中位数", formatNumber(stats.median)]
+      ["价格中位数", formatFieldNumber(mappings.price, stats.median)]
     ],
     insights,
     table: primaryDimension ? numericGroupTable(primaryDimension, mappings.price, grouped) : simpleStatsTable(mappings.price, stats, values.length),
     mainChart: primaryDimension
-      ? barChartConfig(`按 ${primaryDimension} 的平均价格 Top 10`, topLabels(grouped, "avg"), topValues(grouped, "avg"), "平均价格", "平均值", CHART_THEME.primary)
-      : histogramChartConfig(`${mappings.price} 分布`, values, "记录数"),
-    secondaryChart: histogramChartConfig(`${mappings.price} 分布`, values, "记录数"),
-    trendChart: trend ? lineChartConfig(`${mappings.price} 时间趋势`, trend.labels, trend.values, "平均价格", "平均值") : null
+      ? barChartConfig(`按 ${primaryDimension} 的平均价格 Top 10`, topLabels(grouped, "avg"), topValues(grouped, "avg"), "平均价格", "平均值", CHART_THEME.primary, mappings.price)
+      : histogramChartConfig(`${mappings.price} 分布`, values, "记录数", mappings.price),
+    secondaryChart: histogramChartConfig(`${mappings.price} 分布`, values, "记录数", mappings.price),
+    trendChart: trend ? lineChartConfig(`${mappings.price} 时间趋势`, trend.labels, trend.values, "平均价格", "平均值", mappings.price) : null
   };
 }
 
@@ -1629,7 +1829,7 @@ function analyzeSurveyTemplate(mappings) {
   const insights = [
     `问卷模板共选择 ${formatInteger(selectedFields.length)} 个字段，数据表总记录数为 ${formatInteger(state.rows.length)}。`,
     numericSummaries[0]
-      ? `数值字段「${numericSummaries[0].field}」的平均值为 ${formatNumber(numericSummaries[0].stats.mean)}，中位数为 ${formatNumber(numericSummaries[0].stats.median)}。`
+      ? `数值字段「${numericSummaries[0].field}」的平均值为 ${formatFieldNumber(numericSummaries[0].field, numericSummaries[0].stats.mean)}，中位数为 ${formatFieldNumber(numericSummaries[0].field, numericSummaries[0].stats.median)}。`
       : "未选择可解析的数值字段，因此未生成满意度或年龄的数值统计。",
     primaryRows[0]
       ? `分类字段「${primaryCategory}」中出现最多的类别是「${primaryRows[0].name}」，占比 ${formatPercent(primaryRows[0].ratio)}。该结果只描述样本分布。`
@@ -1648,9 +1848,9 @@ function analyzeSurveyTemplate(mappings) {
     table: surveyTable(numericSummaries, categoricalFields),
     mainChart: primaryCategory
       ? barChartConfig(`${primaryCategory} Top 10`, topLabels(primaryRows), topValues(primaryRows, "count"), "频数", "频数", CHART_THEME.primary)
-      : histogramChartConfig(numericSummaries[0]?.field || "数值字段", chartValues, "记录数"),
+      : histogramChartConfig(numericSummaries[0]?.field || "数值字段", chartValues, "记录数", numericSummaries[0]?.field || ""),
     secondaryChart: numericSummaries[0]
-      ? histogramChartConfig(`${numericSummaries[0].field} 分布`, chartValues, "记录数")
+      ? histogramChartConfig(`${numericSummaries[0].field} 分布`, chartValues, "记录数", numericSummaries[0].field)
       : barChartConfig("分类字段 Top 10", topLabels(primaryRows), topValues(primaryRows, "count"), "频数", "频数", CHART_THEME.secondary),
     trendChart: null
   };
@@ -1692,16 +1892,27 @@ function analyzeBehaviorTemplate(mappings) {
 
 function buildSalesMetricRows(mappings) {
   let label = "";
-  if (mappings.salesAmount) label = mappings.salesAmount;
+  let formatField = "";
+  if (mappings.salesAmount) {
+    label = mappings.salesAmount;
+    formatField = mappings.salesAmount;
+  }
   else if (mappings.unitPrice && mappings.quantity) label = `${mappings.unitPrice} × ${mappings.quantity}`;
-  else if (mappings.unitPrice) label = mappings.unitPrice;
-  else if (mappings.quantity) label = mappings.quantity;
+  else if (mappings.unitPrice) {
+    label = mappings.unitPrice;
+    formatField = mappings.unitPrice;
+  }
+  else if (mappings.quantity) {
+    label = mappings.quantity;
+    formatField = mappings.quantity;
+  }
   else return null;
 
   const rows = state.rows
     .map((row) => ({ row, value: getSalesMetricValue(row, mappings) }))
     .filter((item) => item.value !== null);
   rows.label = label;
+  rows.formatField = formatField;
   return rows;
 }
 
@@ -1754,17 +1965,27 @@ function summarizeGroupedValues(groups) {
 }
 
 function buildTrendFromRows(dateField, valueGetter, aggregate) {
-  const groups = new Map();
+  const items = [];
   state.rows.forEach((row) => {
-    const date = toDate(row[dateField]);
+    const date = parseFieldDate(dateField, row[dateField]);
     if (!date) return;
-    const key = date.toISOString().slice(0, 10);
-    if (!groups.has(key)) groups.set(key, []);
-    if (aggregate === "count") groups.get(key).push(1);
-    else {
-      const value = valueGetter(row);
-      if (value !== null) groups.get(key).push(value);
+    if (aggregate === "count") {
+      items.push({ date, value: 1 });
+      return;
     }
+    const value = valueGetter(row);
+    if (value !== null) items.push({ date, value });
+  });
+
+  if (!items.length) return { labels: [], values: [] };
+  items.sort((a, b) => a.date - b.date);
+  const spanDays = (items[items.length - 1].date - items[0].date) / 86400000;
+  const groupByMonth = spanDays > 120;
+  const groups = new Map();
+  items.forEach(({ date, value }) => {
+    const key = getDateTrendKey(dateField, date, groupByMonth);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(value);
   });
 
   const labels = Array.from(groups.keys()).sort();
@@ -1798,16 +2019,16 @@ function summarizeNumbers(values) {
   };
 }
 
-function numericGroupTable(groupField, metricField, rows) {
+function numericGroupTable(groupField, metricField, rows, formatField = metricField) {
   return {
     headers: [groupField, "记录数", `${metricField} 求和`, `${metricField} 平均值`, "最小值", "最大值"],
     rows: rows.map((row) => [
       row.name,
       formatInteger(row.count),
-      formatNumber(row.sum),
-      formatNumber(row.avg),
-      formatNumber(row.min),
-      formatNumber(row.max)
+      formatFieldNumber(formatField, row.sum),
+      formatFieldNumber(formatField, row.avg),
+      formatFieldNumber(formatField, row.min),
+      formatFieldNumber(formatField, row.max)
     ])
   };
 }
@@ -1822,14 +2043,14 @@ function frequencyTable(field, rows) {
 function simpleStatsTable(field, stats, count) {
   return {
     headers: ["字段", "有效数量", "平均值", "中位数", "最小值", "最大值", "标准差"],
-    rows: [[field, formatInteger(count), formatNumber(stats.mean), formatNumber(stats.median), formatNumber(stats.min), formatNumber(stats.max), formatNumber(stats.std)]]
+    rows: [[field, formatInteger(count), formatFieldNumber(field, stats.mean), formatFieldNumber(field, stats.median), formatFieldNumber(field, stats.min), formatFieldNumber(field, stats.max), formatFieldNumber(field, stats.std)]]
   };
 }
 
 function surveyTable(numericSummaries, categoricalFields) {
   const rows = [];
   numericSummaries.forEach((item) => {
-    rows.push([item.field, "数值字段", `有效 ${formatInteger(item.count)} 条，平均值 ${formatNumber(item.stats.mean)}，中位数 ${formatNumber(item.stats.median)}`]);
+    rows.push([item.field, "数值字段", `有效 ${formatInteger(item.count)} 条，平均值 ${formatFieldNumber(item.field, item.stats.mean)}，中位数 ${formatFieldNumber(item.field, item.stats.median)}`]);
   });
   categoricalFields.forEach((field) => {
     const top = frequencyRows(field)[0];
@@ -1875,11 +2096,11 @@ function topValues(rows, valueKey) {
   return [...rows].sort((a, b) => (b[valueKey] ?? 0) - (a[valueKey] ?? 0)).slice(0, 10).map((item) => item[valueKey] ?? 0);
 }
 
-function barChartConfig(title, labels, values, label, axisLabel, color) {
-  return { type: "bar", title, labels, values, label, axisLabel, color };
+function barChartConfig(title, labels, values, label, axisLabel, color, valueField = "") {
+  return { type: "bar", title, labels, values, label, axisLabel, color, valueField };
 }
 
-function lineChartConfig(title, labels, values, label, axisLabel) {
+function lineChartConfig(title, labels, values, label, axisLabel, valueField = "") {
   return {
     type: "line",
     title,
@@ -1887,13 +2108,14 @@ function lineChartConfig(title, labels, values, label, axisLabel) {
     values,
     label,
     axisLabel,
+    valueField,
     color: CHART_THEME.secondary,
     background: CHART_THEME.secondaryFill
   };
 }
 
-function histogramChartConfig(title, values, axisLabel) {
-  const bins = buildHistogram(values, 10);
+function histogramChartConfig(title, values, axisLabel, sourceField = "") {
+  const bins = buildHistogram(values, 10, sourceField);
   return {
     type: "bar",
     title,
@@ -1910,7 +2132,7 @@ function fieldHasNumericData(field) {
 }
 
 function fieldHasDateData(field) {
-  return state.rows.some((row) => Boolean(toDate(row[field])));
+  return state.rows.some((row) => Boolean(parseFieldDate(field, row[field])));
 }
 
 function countNonMissingValues(field) {
@@ -1918,8 +2140,12 @@ function countNonMissingValues(field) {
 }
 
 function buildTrendInsight(dateField) {
-  const numericField = getProfilesByType("numeric")[0]?.field;
+  const numericField = getProfilesByType("numeric")
+    .find((profile) => fieldHasNumericData(profile.field))?.field;
   const trend = buildDateTrend(dateField, numericField);
+  if (!trend.labels.length) {
+    return `日期字段「${dateField}」没有可安全转换的有效日期，因此未生成趋势结论。`;
+  }
   if (trend.values.length < 2) {
     return `日期字段「${dateField}」可用于趋势分析，但有效时间点不足以判断变化方向。`;
   }
@@ -1933,9 +2159,10 @@ function buildTrendInsight(dateField) {
 function buildDateTrend(dateField, numericField) {
   const items = [];
   state.rows.forEach((row) => {
-    const date = toDate(row[dateField]);
+    const date = parseFieldDate(dateField, row[dateField]);
     if (!date) return;
     const value = numericField ? toNumber(row[numericField]) : null;
+    if (numericField && value === null) return;
     items.push({ date, value });
   });
 
@@ -1949,9 +2176,7 @@ function buildDateTrend(dateField, numericField) {
   const groups = new Map();
 
   items.forEach((item) => {
-    const key = groupByMonth
-      ? `${item.date.getFullYear()}-${String(item.date.getMonth() + 1).padStart(2, "0")}`
-      : item.date.toISOString().slice(0, 10);
+    const key = getDateTrendKey(dateField, item.date, groupByMonth);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(item.value);
   });
@@ -1968,7 +2193,9 @@ function buildDateTrend(dateField, numericField) {
   return {
     labels,
     values,
-    label: hasMetric ? `${numericField} 平均值趋势` : "记录数趋势",
+    label: hasMetric
+      ? `${numericField}${getDateGranularity(dateField) === "year" ? "年度" : " "}平均值趋势`
+      : `${getDateGranularity(dateField) === "year" ? "年度" : ""}记录数趋势`,
     axisLabel: hasMetric ? "平均值" : "记录数"
   };
 }
@@ -1994,11 +2221,11 @@ function aggregateByCategory(metricField, groupField, method) {
     .sort((a, b) => b.value - a.value);
 }
 
-function buildHistogram(values, binCount) {
+function buildHistogram(values, binCount, field = "") {
   if (!values.length) return [];
   const min = Math.min(...values);
   const max = Math.max(...values);
-  if (min === max) return [{ label: formatNumber(min), count: values.length }];
+  if (min === max) return [{ label: formatFieldNumber(field, min), count: values.length }];
   const width = (max - min) / binCount;
   const bins = Array.from({ length: binCount }, (_, index) => {
     const start = min + index * width;
@@ -2006,7 +2233,7 @@ function buildHistogram(values, binCount) {
     return {
       start,
       end,
-      label: `${formatNumber(start)} - ${formatNumber(end)}`,
+      label: `${formatFieldNumber(field, start)} - ${formatFieldNumber(field, end)}`,
       count: 0
     };
   });
@@ -2017,7 +2244,7 @@ function buildHistogram(values, binCount) {
   return bins;
 }
 
-function chartOptions(axisLabel) {
+function chartOptions(axisLabel, valueField = "") {
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -2031,7 +2258,16 @@ function chartOptions(axisLabel) {
         titleColor: "#ffffff",
         bodyColor: "#e5e7ef",
         padding: 11,
-        cornerRadius: 8
+        cornerRadius: 8,
+        ...(valueField ? {
+          callbacks: {
+            label(context) {
+              const datasetLabel = context.dataset?.label ? `${context.dataset.label}: ` : "";
+              const value = typeof context.parsed?.y === "number" ? context.parsed.y : Number(context.raw);
+              return `${datasetLabel}${formatFieldNumber(valueField, value)}`;
+            }
+          }
+        } : {})
       }
     },
     scales: {
@@ -2043,7 +2279,10 @@ function chartOptions(axisLabel) {
       y: {
         beginAtZero: true,
         title: { display: true, text: axisLabel, color: CHART_THEME.text },
-        ticks: { color: CHART_THEME.text },
+        ticks: {
+          color: CHART_THEME.text,
+          ...(valueField ? { callback: (value) => formatFieldNumber(valueField, Number(value)) } : {})
+        },
         grid: { color: CHART_THEME.grid },
         border: { display: false }
       }
@@ -2074,6 +2313,7 @@ function resetAnalysisState() {
   state.totalMissing = 0;
   state.parseWarnings = [];
   state.typeOverrides = {};
+  state.fieldTypeDrafts = {};
   state.pendingExcel = null;
 
   dom.sourceName.textContent = "";
@@ -2082,6 +2322,10 @@ function resetAnalysisState() {
   dom.insights.innerHTML = "";
   dom.previewTable.innerHTML = "";
   dom.schemaTable.innerHTML = "";
+  dom.fieldConfigMessage.textContent = "";
+  dom.fieldConfigMessage.className = "field-config-message";
+  dom.applyFieldConfig.disabled = true;
+  dom.restoreAutoFieldTypes.disabled = true;
   dom.qualitySummary.innerHTML = "";
   dom.qualityTable.innerHTML = "";
   dom.outlierTable.innerHTML = "";
@@ -2146,6 +2390,36 @@ function getProfilesByType(typeKey) {
   return state.profiles.filter((profile) => profile.typeKey === typeKey);
 }
 
+function getActiveProfiles() {
+  return state.profiles.filter((profile) => profile.typeKey !== "ignore");
+}
+
+function getActiveFields() {
+  return getActiveProfiles().map((profile) => profile.field);
+}
+
+function getFieldProfile(field) {
+  return state.profiles.find((profile) => profile.field === field);
+}
+
+function parseFieldDate(field, value) {
+  return toDate(value, getFieldProfile(field)?.dateStrategy || {});
+}
+
+function getDateGranularity(field) {
+  return getFieldProfile(field)?.dateStrategy?.granularity || "day";
+}
+
+function getDateTrendKey(field, date, groupByMonth = false) {
+  if (getDateGranularity(field) === "year") {
+    return String(date.getUTCFullYear());
+  }
+  if (groupByMonth) {
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  }
+  return date.toISOString().slice(0, 10);
+}
+
 function setSelectOptions(select, values, placeholder = "", allowEmpty = false) {
   const placeholderOption = placeholder
     ? `<option value="">${escapeHtml(placeholder)}</option>`
@@ -2197,6 +2471,93 @@ function displayValue(value) {
   return isMissing(value) ? "" : String(value).trim();
 }
 
+function isIdFieldName(field) {
+  const name = String(field || "").trim();
+  return /(^|[_\-\s])(id|uuid|guid|code|key|number|no)([_\-\s]|$)/i.test(name)
+    || /(id|uuid|guid|code|key|number|no)$/i.test(name)
+    || /[a-z](Id|ID)$/.test(name)
+    || /编号|编码|代码|订单号|账号|工号|主键|用户ID|事件ID|会话ID/i.test(name)
+    || /(?:学号|学籍号|考生号|准考证号|身份证号|身份证号码|证件号|手机号|手机号码|流水号|序列号|设备号|会员号|合同号|票据号|批次号|档案号)(?:$|[_\-\s（(])/i.test(name);
+}
+
+function isYearFieldName(field) {
+  const name = String(field || "").trim();
+  return /(年份|年度|学年|财年|会计年度|统计年度|统计年|报告年|出生年|入学年|毕业年)$/i.test(name)
+    || /(^|[_\-\s])(year|fiscal_year|calendar_year|school_year|yr|fy)([_\-\s]|$)/i.test(name);
+}
+
+function buildDateStrategy(field, values) {
+  let dmyEvidence = 0;
+  let mdyEvidence = 0;
+  let yearOnlyCount = 0;
+
+  values.forEach((value) => {
+    if (isDateObject(value)) return;
+    const raw = String(value).trim();
+    const yearText = raw.match(/^(\d{4})\s*年$/);
+    if (isPlausibleYear(yearText ? yearText[1] : raw)) yearOnlyCount += 1;
+    const match = matchDayOrMonthFirstDate(raw);
+    if (!match) return;
+    const first = Number(match[1]);
+    const second = Number(match[3]);
+    const year = Number(match[4]);
+    if (first > 12 && second <= 12 && buildUtcDate(year, second, first)) dmyEvidence += 1;
+    if (second > 12 && first <= 12 && buildUtcDate(year, first, second)) mdyEvidence += 1;
+  });
+
+  let order = "none";
+  if (dmyEvidence && mdyEvidence) order = "conflict";
+  else if (dmyEvidence) order = "dmy";
+  else if (mdyEvidence) order = "mdy";
+
+  const allowYearOnly = isYearFieldName(field)
+    && values.length > 0
+    && yearOnlyCount / values.length >= 0.8;
+
+  return {
+    order,
+    allowYearOnly,
+    granularity: allowYearOnly ? "year" : "day",
+    dmyEvidence,
+    mdyEvidence
+  };
+}
+
+function isPlausibleYear(value) {
+  if (!/^\d{4}$/.test(value)) return false;
+  const year = Number(value);
+  return year >= 1900 && year <= 2200;
+}
+
+function isDateObject(value) {
+  return Object.prototype.toString.call(value) === "[object Date]"
+    && typeof value.getTime === "function";
+}
+
+function matchYearFirstDate(raw) {
+  return raw.match(new RegExp(`^(\\d{4})([-/.])(\\d{1,2})\\2(\\d{1,2})${DATE_TIME_SUFFIX_PATTERN}$`));
+}
+
+function matchDayOrMonthFirstDate(raw) {
+  return raw.match(new RegExp(`^(\\d{1,2})([-/.])(\\d{1,2})\\2(\\d{4})${DATE_TIME_SUFFIX_PATTERN}$`));
+}
+
+function matchChineseDate(raw) {
+  return raw.match(new RegExp(`^(\\d{4})\\s*年\\s*(\\d{1,2})\\s*月\\s*(\\d{1,2})\\s*日?${DATE_TIME_SUFFIX_PATTERN}$`));
+}
+
+function detectNumericFormat(values) {
+  const convertibleValues = values.filter((value) => toNumber(value) !== null);
+  if (!convertibleValues.length) return "number";
+  return convertibleValues.every(hasPercentToken) ? "percent" : "number";
+}
+
+function hasPercentToken(value) {
+  const raw = String(value).trim();
+  const unsigned = /^\(.*\)$/.test(raw) ? raw.slice(1, -1).trim() : raw;
+  return /%$/.test(unsigned);
+}
+
 function toNumber(value) {
   if (isMissing(value)) return null;
   const raw = String(value).trim();
@@ -2213,22 +2574,53 @@ function toNumber(value) {
   return parsed;
 }
 
-function toDate(value) {
+function toDate(value, strategy = {}) {
   if (isMissing(value)) return null;
-  const raw = String(value).trim();
-  if (/^[-+]?\d+(\.\d+)?$/.test(raw)) return null;
-  const yearFirst = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T].*)?$/);
-  if (yearFirst) {
-    return buildUtcDate(Number(yearFirst[1]), Number(yearFirst[2]), Number(yearFirst[3]));
+  if (isDateObject(value)) {
+    if (Number.isNaN(value.getTime())) return null;
+    const localMidnight = value.getHours() === 0
+      && value.getMinutes() === 0
+      && value.getSeconds() === 0
+      && value.getMilliseconds() === 0;
+    const utcMidnight = value.getUTCHours() === 0
+      && value.getUTCMinutes() === 0
+      && value.getUTCSeconds() === 0
+      && value.getUTCMilliseconds() === 0;
+    const useUtcParts = !localMidnight && utcMidnight;
+    return buildUtcDate(
+      useUtcParts ? value.getUTCFullYear() : value.getFullYear(),
+      (useUtcParts ? value.getUTCMonth() : value.getMonth()) + 1,
+      useUtcParts ? value.getUTCDate() : value.getDate()
+    );
   }
 
-  const dayOrMonthFirst = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:[ T].*)?$/);
+  const raw = String(value).trim();
+  const yearText = raw.match(/^(\d{4})\s*年$/);
+  const yearOnlyValue = yearText ? yearText[1] : raw;
+  if (strategy.allowYearOnly && isPlausibleYear(yearOnlyValue)) {
+    return buildUtcDate(Number(yearOnlyValue), 1, 1);
+  }
+  if (/^[-+]?\d+(\.\d+)?$/.test(raw)) return null;
+  const chineseDate = matchChineseDate(raw);
+  if (chineseDate) {
+    return buildUtcDate(Number(chineseDate[1]), Number(chineseDate[2]), Number(chineseDate[3]));
+  }
+
+  const yearFirst = matchYearFirstDate(raw);
+  if (yearFirst) {
+    return buildUtcDate(Number(yearFirst[1]), Number(yearFirst[3]), Number(yearFirst[4]));
+  }
+
+  const dayOrMonthFirst = matchDayOrMonthFirstDate(raw);
   if (dayOrMonthFirst) {
     const first = Number(dayOrMonthFirst[1]);
-    const second = Number(dayOrMonthFirst[2]);
-    const year = Number(dayOrMonthFirst[3]);
+    const second = Number(dayOrMonthFirst[3]);
+    const year = Number(dayOrMonthFirst[4]);
     if (first > 12) return buildUtcDate(year, second, first);
     if (second > 12) return buildUtcDate(year, first, second);
+    if (first === second) return buildUtcDate(year, first, second);
+    if (strategy.order === "dmy") return buildUtcDate(year, second, first);
+    if (strategy.order === "mdy") return buildUtcDate(year, first, second);
     return null;
   }
 
@@ -2294,11 +2686,33 @@ function formatPercent(value) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+function getNumericFormat(field) {
+  return getFieldProfile(field)?.numericFormat || "number";
+}
+
+function formatFieldNumber(field, value) {
+  if (!Number.isFinite(value)) return "-";
+  if (getNumericFormat(field) === "percent") {
+    return new Intl.NumberFormat("zh-CN", {
+      style: "percent",
+      maximumFractionDigits: 2
+    }).format(value);
+  }
+  return formatNumber(value);
+}
+
+function numericAxisLabel(field, fallbackLabel) {
+  return getNumericFormat(field) === "percent"
+    ? `${fallbackLabel}（百分比）`
+    : fallbackLabel;
+}
+
 async function exportHtmlReport() {
   if (!state.rows.length) {
     showError("请先上传数据并生成分析报告。");
     return;
   }
+  if (!ensureFieldConfigurationApplied("导出 HTML 报告")) return;
 
   const button = dom.exportHtmlReport;
   button.disabled = true;
@@ -2307,7 +2721,7 @@ async function exportHtmlReport() {
   try {
     const report = dom.results.cloneNode(true);
     report.classList.remove("hidden");
-    report.querySelectorAll(".report-actions, .nav-new-analysis").forEach((element) => element.remove());
+    report.querySelectorAll(".report-actions, .nav-new-analysis, .field-config-actions").forEach((element) => element.remove());
 
     const originalCanvases = Array.from(dom.results.querySelectorAll("canvas"));
     const clonedCanvases = Array.from(report.querySelectorAll("canvas"));

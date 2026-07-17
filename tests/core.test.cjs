@@ -55,6 +55,30 @@ function evaluate(expression) {
   return vm.runInContext(expression, context);
 }
 
+const utf8CsvText = "姓名,城市\n张三,上海";
+const utf8CsvBytes = Array.from(new TextEncoder().encode(utf8CsvText));
+const gbkCsvBytes = [
+  0xd0, 0xd5, 0xc3, 0xfb, 0x2c, 0xb3, 0xc7, 0xca, 0xd0, 0x0a,
+  0xd5, 0xc5, 0xc8, 0xfd, 0x2c, 0xc9, 0xcf, 0xba, 0xa3
+];
+
+assert.equal(
+  evaluate(`decodeCsvBuffer(new Uint8Array(${JSON.stringify(utf8CsvBytes)}).buffer, "utf-8").text`),
+  utf8CsvText
+);
+assert.equal(
+  evaluate(`decodeCsvBuffer(new Uint8Array(${JSON.stringify(gbkCsvBytes)}).buffer, "gbk").text`),
+  utf8CsvText
+);
+assert.equal(
+  evaluate(`decodeCsvBuffer(new Uint8Array(${JSON.stringify(gbkCsvBytes)}).buffer, "gb18030").text`),
+  utf8CsvText
+);
+assert.equal(
+  evaluate(`decodeCsvBuffer(new Uint8Array(${JSON.stringify(gbkCsvBytes)}).buffer, "auto").text`),
+  utf8CsvText
+);
+
 assert.equal(evaluate('toNumber("10%")'), 0.1);
 assert.equal(evaluate('toNumber("(10%)")'), -0.1);
 assert.equal(evaluate('toNumber("￥1,234.50")'), 1234.5);
@@ -65,6 +89,94 @@ assert.equal(evaluate('toDate("2026-07-17").toISOString()'), "2026-07-17T00:00:0
 assert.equal(evaluate('toDate("2026-02-30")'), null);
 assert.equal(evaluate('toDate("07/08/2026")'), null);
 assert.equal(evaluate('toDate("17/07/2026").toISOString()'), "2026-07-17T00:00:00.000Z");
+assert.equal(evaluate('toDate("2026年7月19日").toISOString()'), "2026-07-19T00:00:00.000Z");
+assert.equal(evaluate('toDate("2026年2月30日")'), null);
+assert.equal(evaluate('toDate("2026-07-17 garbage")'), null);
+assert.equal(evaluate('toDate("08/08/2026").toISOString()'), "2026-08-08T00:00:00.000Z");
+assert.equal(evaluate('toDate(new Date(2026, 6, 24)).toISOString()'), "2026-07-24T00:00:00.000Z");
+assert.equal(evaluate('toDate(new Date(Date.UTC(2026, 6, 24))).toISOString()'), "2026-07-24T00:00:00.000Z");
+
+const studentRows = Array.from({ length: 12 }, (_, index) => ({ 学号: String(20260001 + index) }));
+context.__studentRows = studentRows;
+assert.equal(evaluate('buildColumnProfile("学号", __studentRows).typeKey'), "id");
+assert.equal(evaluate('buildColumnProfile("学号数量", __studentRows.map((row, index) => ({"学号数量": index + 1}))).typeKey'), "numeric");
+assert.equal(evaluate('buildColumnProfile("编号", __studentRows.map((row, index) => ({"编号": 100001 + index}))).typeKey'), "id");
+assert.equal(evaluate('buildColumnProfile("记录值", __studentRows.map((row, index) => ({"记录值": 100001 + index}))).typeKey'), "numeric");
+
+const yearRows = [
+  { 年份: "2023", 销售额: "100" },
+  { 年份: "2024", 销售额: "200" },
+  { 年份: "2025", 销售额: "300" }
+];
+context.__yearRows = yearRows;
+assert.equal(evaluate('buildColumnProfile("年份", __yearRows).typeKey'), "date");
+assert.equal(evaluate('buildColumnProfile("年份", __yearRows).dateStrategy.granularity'), "year");
+assert.equal(evaluate('buildColumnProfile("年份", __yearRows).conversionFailuresByType.date'), 0);
+assert.equal(evaluate('buildColumnProfile("销售额", __yearRows).typeKey'), "numeric");
+assert.equal(evaluate('buildColumnProfile("年龄", [{"年龄":"20"},{"年龄":"21"}]).typeKey'), "numeric");
+evaluate('state.rows = __yearRows; state.profiles = [buildColumnProfile("年份", __yearRows), buildColumnProfile("销售额", __yearRows)]');
+assert.equal(
+  evaluate('JSON.stringify(buildDateTrend("年份", "销售额").labels)'),
+  JSON.stringify(["2023", "2024", "2025"])
+);
+assert.equal(
+  evaluate('JSON.stringify(buildMetricDateTrend("年份", "销售额").labels)'),
+  JSON.stringify(["2023", "2024", "2025"])
+);
+assert.equal(
+  evaluate('JSON.stringify(buildTrendFromRows("年份", (row) => toNumber(row["销售额"]), "sum").labels)'),
+  JSON.stringify(["2023", "2024", "2025"])
+);
+
+const mixedDateRows = [
+  { 日期: "2025-01-02", 指标: "10" },
+  { 日期: "2025/1/3", 指标: "20" },
+  { 日期: "13/01/2025", 指标: "30" },
+  { 日期: "2025年1月4日", 指标: "40" },
+  { 日期: "01/02/2025", 指标: "50" }
+];
+context.__mixedDateRows = mixedDateRows;
+assert.equal(evaluate('buildColumnProfile("日期", __mixedDateRows).dateStrategy.order'), "dmy");
+assert.equal(evaluate('buildColumnProfile("日期", __mixedDateRows).dateRatio'), 1);
+assert.equal(evaluate('buildColumnProfile("日期", __mixedDateRows).typeKey'), "date");
+evaluate('state.rows = __mixedDateRows; state.profiles = [buildColumnProfile("日期", __mixedDateRows), buildColumnProfile("指标", __mixedDateRows)]');
+assert.equal(evaluate('parseFieldDate("日期", "01/02/2025").toISOString()'), "2025-02-01T00:00:00.000Z");
+assert.equal(evaluate('buildDateTrend("日期", "指标").labels.length'), 5);
+
+const conflictingDateRows = [
+  { 日期: "20/07/2026" },
+  { 日期: "07/20/2026" },
+  { 日期: "07/08/2026" }
+];
+context.__conflictingDateRows = conflictingDateRows;
+assert.equal(evaluate('buildColumnProfile("日期", __conflictingDateRows).dateStrategy.order'), "conflict");
+assert.equal(evaluate('buildColumnProfile("日期", __conflictingDateRows).conversionFailuresByType.date'), 1);
+assert.equal(evaluate('buildColumnProfile("日期", [{"日期":"31/02/2026"},{"日期":"07/08/2026"}]).dateStrategy.order'), "none");
+
+const formattedNumericRows = [
+  { 价格: "￥1,234.50", 转化率: "10%" },
+  { 价格: "2,000", 转化率: "25%" },
+  { 价格: "980", 转化率: "100%" },
+  { 价格: "￥3,500", 转化率: "0%" },
+  { 价格: "错误", 转化率: "错误" },
+  { 价格: "", 转化率: "" }
+];
+context.__formattedNumericRows = formattedNumericRows;
+assert.equal(evaluate('buildColumnProfile("价格", __formattedNumericRows).typeKey'), "numeric");
+assert.equal(evaluate('buildColumnProfile("价格", __formattedNumericRows).numericFormat'), "number");
+assert.equal(evaluate('buildColumnProfile("价格", __formattedNumericRows).conversionFailuresByType.numeric'), 1);
+assert.equal(evaluate('buildColumnProfile("转化率", __formattedNumericRows).typeKey'), "numeric");
+assert.equal(evaluate('buildColumnProfile("转化率", __formattedNumericRows).numericFormat'), "percent");
+assert.equal(evaluate('buildColumnProfile("转化率", __formattedNumericRows).conversionFailuresByType.numeric'), 1);
+assert.equal(evaluate('buildColumnProfile("混合比例", [{"混合比例":"10%"},{"混合比例":"0.2"}]).numericFormat'), "number");
+evaluate('state.rows = __formattedNumericRows; state.profiles = [buildColumnProfile("价格", __formattedNumericRows), buildColumnProfile("转化率", __formattedNumericRows)]');
+assert.equal(evaluate('formatFieldNumber("转化率", 0.3375)'), "33.75%");
+assert.equal(evaluate('formatFieldNumber("价格", 1234.5)'), "1,234.5");
+assert.equal(evaluate('chartOptions("平均值", "转化率").scales.y.ticks.callback(0.1)'), "10%");
+
+assert.equal(evaluate('countConversionFailuresForValues(["0", "bad", "", null], "numeric")'), 1);
+assert.equal(evaluate('countConversionFailuresForValues(["2026-01-01", "not-a-date", " "], "date")'), 1);
+assert.equal(evaluate('countConversionFailuresForValues(["任意文本"], "category")'), 0);
 
 const excelData = evaluate(`JSON.stringify(buildExcelTabularData(
   [["", "", ""], ["订单编号", "地区", "销售额"], ["A-001", "华东", "1,200"], ["A-002", "华南", "980"]],
@@ -138,8 +250,71 @@ assert.equal(evaluate("state.rows.length"), 2);
 assert.equal(evaluate("state.parseWarnings.length"), 1);
 assert.equal(elements.get("statusPanel").className, "status-panel warning");
 
-evaluate('applyFieldTypeOverride("数值", "category")');
-assert.equal(evaluate('state.profiles.find((item) => item.field === "数值").typeKey'), "category");
+const configImport = evaluate("beginImport()");
+evaluate(`handleParsedData({
+  errors: [],
+  meta: {fields: ["订单号", "金额", "下单日期", "渠道", "备注"]},
+  data: [
+    {"订单号":"A001","金额":"100","下单日期":"2026-01-01","渠道":"线上","备注":"foo"},
+    {"订单号":"A002","金额":"bad","下单日期":"not-a-date","渠道":"门店","备注":""},
+    {"订单号":"A003","金额":"300","下单日期":"2026-01-03","渠道":"线上","备注":"bar"},
+    {"订单号":"A004","金额":"","下单日期":"","渠道":"门店","备注":"baz"}
+  ]
+}, "field-config.csv", ${configImport})`);
+
+assert.equal(
+  evaluate('JSON.stringify(state.profiles.find((item) => item.field === "渠道").sampleValues)'),
+  JSON.stringify(["线上", "门店"])
+);
+assert.equal(evaluate('state.profiles.find((item) => item.field === "金额").typeKey'), "category");
 assert.equal(evaluate("state.numericStats.length"), 0);
+
+evaluate('stageFieldTypeChange("金额", "numeric")');
+evaluate('stageFieldTypeChange("下单日期", "date")');
+evaluate('stageFieldTypeChange("备注", "ignore")');
+assert.equal(evaluate('state.profiles.find((item) => item.field === "金额").typeKey'), "category");
+assert.equal(evaluate('state.fieldTypeDrafts["金额"]'), "numeric");
+assert.equal(evaluate('countFieldConversionFailures("金额", "numeric")'), 1);
+assert.equal(evaluate('countFieldConversionFailures("下单日期", "date")'), 1);
+assert.equal(evaluate("hasFieldConfigDraftChanges()"), true);
+
+const originalRows = evaluate("JSON.stringify(state.rows)");
+evaluate("applyFieldConfiguration()");
+assert.equal(evaluate('state.profiles.find((item) => item.field === "金额").typeKey'), "numeric");
+assert.equal(evaluate('state.profiles.find((item) => item.field === "金额").conversionFailureCount'), 1);
+assert.equal(evaluate('state.profiles.find((item) => item.field === "下单日期").typeKey'), "date");
+assert.equal(evaluate('state.profiles.find((item) => item.field === "下单日期").conversionFailureCount'), 1);
+assert.equal(evaluate('state.profiles.find((item) => item.field === "备注").typeKey'), "ignore");
+assert.equal(evaluate('state.numericStats.find((item) => item.field === "金额").count'), 2);
+assert.equal(evaluate('state.numericStats.find((item) => item.field === "金额").mean'), 200);
+assert.equal(
+  evaluate('JSON.stringify(buildDateTrend("下单日期", "金额"))'),
+  JSON.stringify({
+    labels: ["2026-01-01", "2026-01-03"],
+    values: [100, 300],
+    label: "金额 平均值趋势",
+    axisLabel: "平均值"
+  })
+);
+assert.equal(evaluate('state.categoryStats.some((item) => item.field === "备注")'), false);
+assert.equal(evaluate('getActiveFields().includes("备注")'), false);
+assert.equal(evaluate('buildTemplateFieldOptions({required:true, expected:"numeric"}).includes("金额")'), true);
+assert.equal(evaluate('buildTemplateFieldOptions({required:true, expected:"any"}).includes("备注")'), false);
+assert.equal(evaluate("JSON.stringify(state.rows)"), originalRows);
+
+evaluate("restoreAutomaticFieldTypes()");
+assert.equal(evaluate('state.profiles.find((item) => item.field === "金额").typeKey'), "category");
+assert.equal(evaluate('state.profiles.find((item) => item.field === "下单日期").typeKey'), "category");
+assert.equal(evaluate('state.profiles.find((item) => item.field === "备注").typeKey'), "category");
+assert.equal(evaluate("Object.keys(state.typeOverrides).length"), 0);
+assert.equal(evaluate("state.numericStats.length"), 0);
+
+evaluate('stageFieldTypeChange("渠道", "numeric")');
+evaluate("applyFieldConfiguration()");
+assert.equal(evaluate('state.profiles.find((item) => item.field === "渠道").conversionFailureCount'), 4);
+assert.equal(evaluate("state.numericStats.length"), 0);
+assert.equal(evaluate('buildTemplateFieldOptions({required:true, expected:"numeric"}).includes("渠道")'), false);
+assert.equal(evaluate('JSON.stringify(buildDateTrend("下单日期", "渠道").labels)'), "[]");
+evaluate("restoreAutomaticFieldTypes()");
 
 console.log("core tests passed");

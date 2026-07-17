@@ -317,4 +317,201 @@ assert.equal(evaluate('buildTemplateFieldOptions({required:true, expected:"numer
 assert.equal(evaluate('JSON.stringify(buildDateTrend("下单日期", "渠道").labels)'), "[]");
 evaluate("restoreAutomaticFieldTypes()");
 
+// V2.3 report export: build a serializable report model that is shared by
+// both exporters. Keep these tests DOM-independent so empty analytical
+// sections can be verified without triggering a browser download.
+const reportRows = [
+  { 订单号: "A001", 地区: "华东", 销售额: "100", 日期: "2026-01-01", 备注: "" },
+  { 订单号: "A002", 地区: "华南", 销售额: "200", 日期: "2026-01-02", 备注: "正常" },
+  { 订单号: "A002", 地区: "华南", 销售额: "200", 日期: "2026-01-02", 备注: "正常" }
+];
+context.__reportRows = reportRows;
+evaluate(`(() => {
+  state.rows = __reportRows;
+  state.fields = ["订单号", "地区", "销售额", "日期", "备注"];
+  state.profiles = state.fields.map((field) => buildColumnProfile(field, state.rows));
+  const orderProfile = state.profiles.find((profile) => profile.field === "订单号");
+  orderProfile.typeKey = "id";
+  orderProfile.type = FIELD_TYPE_LABELS.id;
+  state.numericStats = buildNumericStats();
+  state.categoryStats = buildCategoryStats();
+  state.categoryStats.push({
+    field: "测试 Top 10",
+    total: 12,
+    top: Array.from({length: 12}, (_, index) => ({
+      name: "类别" + (index + 1),
+      count: 12 - index,
+      ratio: (12 - index) / 78
+    }))
+  });
+  state.totalMissing = state.profiles.reduce((sum, profile) => sum + profile.missingCount, 0);
+  state.duplicateRows = 1;
+  state.parseWarnings = [{message: "第 3 行字段数量不一致", row: 3}];
+  state.sourceFileName = "销售 数据.xlsx";
+  state.sourceSheetName = "华东<明细>";
+  state.analysisCompletedAt = new Date(2026, 6, 17, 14, 30, 5);
+  state.insights = ["数据集包含 3 行、5 个字段。", "销售额整体上升。"];
+  state.customAnalysis = {
+    metricField: "销售额",
+    groupField: "地区",
+    dateField: "日期",
+    grouped: [
+      {name: "华南", count: 2, sum: 400, avg: 200},
+      {name: "华东", count: 1, sum: 100, avg: 100}
+    ],
+    trend: {
+      labels: ["2026-01-01", "2026-01-02"],
+      values: [100, 400]
+    }
+  };
+})()`);
+
+const reportData = JSON.parse(evaluate(
+  'JSON.stringify(buildReportData(new Date(2026, 6, 17, 14, 30, 5)))'
+));
+assert.equal(reportData.fileName, "销售 数据.xlsx");
+assert.equal(reportData.sheetName, "华东<明细>");
+assert.ok(reportData.analysisTime);
+assert.equal(reportData.dataScale.rows, 3);
+assert.equal(reportData.dataScale.fields, 5);
+assert.equal(reportData.fieldTypes.length, 5);
+assert.equal(reportData.fieldTypes.find((item) => item.field === "订单号").typeKey, "id");
+assert.equal(reportData.fieldTypes.find((item) => item.field === "销售额").typeKey, "numeric");
+assert.equal(reportData.quality.totalMissing, 1);
+assert.equal(reportData.quality.duplicateRows, 1);
+assert.equal(reportData.quality.parseWarnings.length, 1);
+assert.equal(reportData.numericStats.find((item) => item.field === "销售额").mean, "166.67");
+assert.equal(reportData.categoryStats.find((item) => item.field === "测试 Top 10").top.length, 10);
+assert.equal(reportData.dateTrends.find((item) => item.field === "日期").labels.length, 2);
+assert.equal(reportData.customAnalysis.metricField, "销售额");
+assert.equal(reportData.customAnalysis.rows[0].group, "华南");
+assert.ok(Array.isArray(reportData.insights));
+assert.ok(reportData.insights.some((item) => item.includes("数据集包含")));
+
+context.__reportData = reportData;
+const reportHtml = evaluate(`buildHtmlReport(__reportData, [{
+  id: "numericDistributionChart",
+  title: "销售额 <分布>",
+  dataUrl: "data:image/png;base64,ZmFrZS1jaGFydA=="
+}])`);
+assert.match(reportHtml, /^<!DOCTYPE html>/i);
+assert.match(reportHtml, /<meta[^>]+charset=["']?UTF-8/i);
+assert.match(reportHtml, /<style[\s>]/i);
+assert.match(reportHtml, /销售 数据\.xlsx/);
+assert.match(reportHtml, /华东&lt;明细&gt;/);
+assert.match(reportHtml, /字段类型结果/);
+assert.match(reportHtml, /数据质量报告/);
+assert.match(reportHtml, /数值字段描述性统计/);
+assert.match(reportHtml, /分类字段 Top 10/);
+assert.match(reportHtml, /日期趋势摘要/);
+assert.match(reportHtml, /自定义分组分析结果/);
+assert.match(reportHtml, /自动分析结论/);
+assert.match(reportHtml, /销售额 &lt;分布&gt;/);
+assert.match(reportHtml, /data:image\/png;base64,ZmFrZS1jaGFydA==/);
+assert.doesNotMatch(reportHtml, /<(?:script|link)[^>]+(?:src|href)=["']https?:/i);
+
+const reportMarkdown = evaluate("buildMarkdownReport(__reportData)");
+assert.match(reportMarkdown, /^# .+/);
+assert.match(reportMarkdown, /销售 数据\.xlsx/);
+assert.match(reportMarkdown, /华东&lt;明细&gt;/);
+assert.match(reportMarkdown, /## 字段类型结果/);
+assert.match(reportMarkdown, /## 数据质量报告/);
+assert.match(reportMarkdown, /## 数值字段描述性统计/);
+assert.match(reportMarkdown, /## 分类字段 Top 10/);
+assert.match(reportMarkdown, /## 日期趋势摘要/);
+assert.match(reportMarkdown, /## 自定义分组分析结果/);
+assert.match(reportMarkdown, /## 自动分析结论/);
+assert.match(reportMarkdown, /\| 销售额 \|/);
+
+assert.match(
+  evaluate('buildReportFileName("html", new Date(2026, 6, 17, 14, 30, 5))'),
+  /^销售 数据(?:\.xlsx)?[-_].*20260717.*143005.*\.html$/
+);
+evaluate('state.sourceFileName = "客户:销售?.xlsx"');
+const markdownFileName = evaluate('buildReportFileName("md", new Date(2026, 6, 17, 14, 30, 5))');
+assert.match(markdownFileName, /20260717.*143005.*\.md$/);
+assert.doesNotMatch(markdownFileName, /[<>:"/\\|?*]/);
+evaluate('state.sourceFileName = "销售 数据.xlsx"');
+
+assert.equal(evaluate("canExportReport()"), true);
+evaluate("updateExportButtons()");
+assert.equal(elements.get("exportHtmlReport").disabled, false);
+assert.equal(elements.get("exportMarkdownReport").disabled, false);
+
+evaluate("state.analysisCompletedAt = null");
+assert.equal(evaluate("canExportReport()"), false);
+evaluate("updateExportButtons()");
+assert.equal(elements.get("exportHtmlReport").disabled, true);
+assert.equal(elements.get("exportMarkdownReport").disabled, true);
+evaluate("state.analysisCompletedAt = new Date(2026, 6, 17, 14, 30, 5); state.rows = []");
+assert.equal(evaluate("canExportReport()"), false);
+
+// A date/category-only file still gets a date summary even though descriptive
+// numeric statistics and metric-based charts are unavailable.
+context.__noNumericRows = [
+  { 日期: "2026-01-01", 说明: "开始" },
+  { 日期: "2026-01-02", 说明: "继续" }
+];
+evaluate(`(() => {
+  state.rows = __noNumericRows;
+  state.fields = ["日期", "说明"];
+  state.profiles = state.fields.map((field) => buildColumnProfile(field, state.rows));
+  state.numericStats = buildNumericStats();
+  state.categoryStats = buildCategoryStats();
+  state.totalMissing = 0;
+  state.duplicateRows = 0;
+  state.parseWarnings = [];
+  state.sourceFileName = "无数值字段.csv";
+  state.sourceSheetName = "";
+  state.sourceType = "csv";
+  state.analysisCompletedAt = new Date(2026, 6, 17, 15, 0, 0);
+  state.insights = ["未识别到可用于统计的数值字段。"];
+  state.customAnalysis = null;
+})()`);
+const noNumericReport = JSON.parse(evaluate(
+  'JSON.stringify(buildReportData(new Date(2026, 6, 17, 15, 0, 0)))'
+));
+assert.equal(noNumericReport.numericStats.length, 0);
+assert.equal(noNumericReport.dateTrends.length, 1);
+assert.deepEqual(noNumericReport.dateTrends[0].labels, ["2026-01-01", "2026-01-02"]);
+context.__noNumericReport = noNumericReport;
+assert.doesNotThrow(() => evaluate("buildHtmlReport(__noNumericReport, [])"));
+assert.doesNotThrow(() => evaluate("buildMarkdownReport(__noNumericReport)"));
+
+// Report renderers must keep working when no optional analytical section has
+// data. This covers category-only files, empty trends and no custom analysis.
+const emptySectionsReport = {
+  ...reportData,
+  dataScale: { rows: 1, fields: 1 },
+  fieldTypes: [{
+    field: "说明",
+    typeKey: "category",
+    type: "分类",
+    nonMissingCount: 1,
+    uniqueCount: 1,
+    sampleValues: ["仅文本"]
+  }],
+  quality: {
+    ...reportData.quality,
+    totalMissing: 0,
+    duplicateRows: 0,
+    parseWarningCount: 0,
+    parseWarnings: [],
+    missingByField: [],
+    outliers: []
+  },
+  numericStats: [],
+  categoryStats: [],
+  dateTrends: [],
+  customAnalysis: { completed: false, message: "当前没有可导出的自定义分组分析结果。" },
+  insights: ["未识别到可用于统计的数值字段。"]
+};
+context.__emptySectionsReport = emptySectionsReport;
+assert.doesNotThrow(() => evaluate("buildHtmlReport(__emptySectionsReport, [])"));
+assert.doesNotThrow(() => evaluate("buildMarkdownReport(__emptySectionsReport)"));
+assert.match(evaluate("buildHtmlReport(__emptySectionsReport, [])"), /未识别到数值字段|无可用数值统计/);
+assert.match(evaluate("buildMarkdownReport(__emptySectionsReport)"), /未识别到数值字段|无可用数值统计/);
+assert.doesNotThrow(() => evaluate('buildHtmlReport({fileName:"空数据.csv", dataScale:{rows:0, fields:0}}, [])'));
+assert.doesNotThrow(() => evaluate('buildMarkdownReport({fileName:"空数据.csv", dataScale:{rows:0, fields:0}})'));
+
 console.log("core tests passed");

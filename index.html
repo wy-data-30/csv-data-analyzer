@@ -25,7 +25,7 @@
           <strong>Smart CSV Analyzer</strong>
           <small>CSV 智能分析工作台</small>
         </span>
-        <span class="version-badge">V2.2</span>
+        <span class="version-badge">V2.3</span>
       </a>
       <div class="header-actions">
         <span class="privacy-badge">
@@ -128,9 +128,13 @@
           <a href="#insightsSection"><span>07</span>分析结论</a>
         </nav>
         <a class="nav-new-analysis" href="#dropZone">＋ 分析新文件</a>
-        <div class="report-actions" aria-label="报告导出">
-          <button id="exportHtmlReport" type="button">导出 HTML</button>
-          <button id="printReport" type="button">打印 / PDF</button>
+        <div class="report-actions" aria-labelledby="reportActionsTitle">
+          <div class="report-actions-copy">
+            <strong id="reportActionsTitle">导出报告</strong>
+            <small id="reportExportHint">报告在浏览器本地生成，数据不会上传</small>
+          </div>
+          <button id="exportHtmlReport" type="button" aria-describedby="reportExportHint" disabled>导出 HTML 报告</button>
+          <button id="exportMarkdownReport" type="button" aria-describedby="reportExportHint" disabled>导出 Markdown 报告</button>
         </div>
       </aside>
 

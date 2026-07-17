@@ -1,6 +1,6 @@
 # Smart CSV Analyzer
 
-**Current version:** V2.2
+**Current version:** V2.3
 
 **Live Demo:** [Open Smart CSV Analyzer](https://wy-data-30.github.io/csv-data-analyzer/)
 
@@ -29,7 +29,8 @@ The project is built as a static website and does not require a backend service,
 - Support custom analysis by selecting a numeric metric, a categorical grouping field, and an optional date field.
 - Provide scenario templates for general data, sales data, student scores, used product prices, surveys, and user behavior logs.
 - Generate cautious, data-based insights without assuming external business context.
-- Export a standalone HTML report or use browser printing to save a PDF.
+- Export the completed analysis as an HTML or Markdown report. Both formats include source metadata, field types, data quality, statistics, trends, custom grouping results, and automatic insights.
+- Preserve the currently rendered charts inside a self-contained HTML report that can be opened offline.
 - Support responsive layouts for desktop and mobile screens.
 
 ## Tech Stack
@@ -98,6 +99,7 @@ Using a local static server is recommended because some browsers restrict `fetch
 7. Use **Restore automatic detection** to discard manual type corrections and rebuild the analysis from the inferred types.
 8. Review the generated data overview, quality report, statistics, charts, and insights.
 9. Use the field selectors or a scenario template for custom analysis.
+10. After analysis finishes, use **Export HTML report** or **Export Markdown report** in the report navigation. The export controls remain disabled until a valid analysis is available.
 
 The application does not require fixed column names. Template analysis is based on the fields selected by the user.
 
@@ -164,6 +166,26 @@ Field detection is heuristic. Users can correct inferred types in the field conf
 - Custom grouping chart: groups a selected numeric metric by a selected categorical field.
 - Scenario template charts: render a primary chart, secondary chart, and optional trend chart based on the selected template and field mapping.
 
+## Report Export
+
+V2.3 can download the current analysis as either a standalone HTML file or a Markdown file. Report generation and download happen entirely in the browser; source rows and report contents are never uploaded.
+
+Both formats include:
+
+- Original file name and, for Excel imports, the selected worksheet name.
+- Analysis time and dataset size (row and field counts).
+- Applied field type results, including ignored fields and conversion failure counts where applicable.
+- Data quality summary, per-field missing values, duplicate rows, and numeric outlier results.
+- Descriptive statistics for available numeric fields.
+- Top 10 values for available categorical fields.
+- A summary of available date trends.
+- The current custom grouping analysis result, when a valid metric/group selection is available.
+- Automatically generated analysis conclusions.
+
+The HTML report embeds the currently rendered charts and its required presentation styles in the downloaded file, so the report itself can be opened without a network connection. The Markdown export is a portable text report and represents analytical results as headings, lists, and tables.
+
+Downloaded files use the original file base name plus the local export date and time, for example `sales-20260717-153045.html` or `sales-20260717-153045.md`. For empty or invalid input, analysis does not complete and both buttons stay unavailable. If a valid dataset has no numeric, categorical, date, or custom grouping result, the report records that no applicable fields or results are available instead of failing.
+
 ## Project Highlights
 
 - Static, browser-only architecture suitable for GitHub Pages and other static hosting platforms.
@@ -176,7 +198,7 @@ Field detection is heuristic. Users can correct inferred types in the field conf
 
 ## Privacy
 
-All CSV and Excel parsing and analysis run locally in the browser. The application does not upload data files to a server, store user files, or send dataset contents to a third-party API.
+All CSV and Excel parsing, analysis, and report export run locally in the browser. The application does not upload data files or generated reports to a server, store user files, or send dataset contents to a third-party API.
 
 The page loads PapaParse, Chart.js, and SheetJS from CDN providers. When the page loads these external scripts, the browser may request resources from the CDN host, but uploaded data files remain local to the browser runtime.
 

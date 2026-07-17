@@ -11,7 +11,13 @@ const state = {
   fieldTypeDrafts: {},
   pendingExcel: null,
   activeImportId: 0,
-  charts: {}
+  charts: {},
+  sourceFileName: "",
+  sourceSheetName: "",
+  sourceType: "",
+  analysisCompletedAt: null,
+  insights: [],
+  customAnalysis: null
 };
 
 const dom = {
@@ -68,7 +74,7 @@ const dom = {
   templateTrendCard: document.getElementById("templateTrendCard"),
   templateTrendChartTitle: document.getElementById("templateTrendChartTitle"),
   exportHtmlReport: document.getElementById("exportHtmlReport"),
-  printReport: document.getElementById("printReport")
+  exportMarkdownReport: document.getElementById("exportMarkdownReport")
 };
 
 const ENCODING_LABELS = {
@@ -231,9 +237,7 @@ dom.scenarioTemplate.addEventListener("change", () => {
 
 dom.runTemplateAnalysis.addEventListener("click", runTemplateAnalysis);
 dom.exportHtmlReport.addEventListener("click", exportHtmlReport);
-dom.printReport.addEventListener("click", () => {
-  if (ensureFieldConfigurationApplied("打印或导出 PDF")) window.print();
-});
+dom.exportMarkdownReport.addEventListener("click", exportMarkdownReport);
 dom.confirmSheetSelection.addEventListener("click", analyzeSelectedExcelSheet);
 dom.excelSheetSelect.addEventListener("change", () => {
   dom.sheetSelectionMessage.className = "sheet-selection-message";
@@ -247,6 +251,7 @@ dom.schemaTable.addEventListener("change", (event) => {
 });
 dom.applyFieldConfig.addEventListener("click", applyFieldConfiguration);
 dom.restoreAutoFieldTypes.addEventListener("click", restoreAutomaticFieldTypes);
+updateExportButtons();
 
 [dom.v2MetricField, dom.v2GroupField, dom.v2DateField].forEach((control) => {
   control.addEventListener("change", () => {
@@ -406,7 +411,7 @@ function importExcelSheet(workbook, fileName, sheetName, importId) {
   state.pendingExcel = null;
   dom.sheetSelectionPanel.classList.add("hidden");
   setStatus(`正在分析 ${fileName} · ${sheetName} ...`);
-  commitTabularData(fields, rows, `${fileName} · ${sheetName}`, importId);
+  commitTabularData(fields, rows, fileName, importId, [], sheetName);
 }
 
 function buildExcelTabularData(formattedRows, rawRows, sheetName = "当前工作表") {
@@ -622,7 +627,7 @@ function handleParsedData(results, sourceName, importId) {
   commitTabularData(fields, rows, sourceName, importId, parseWarnings);
 }
 
-function commitTabularData(fields, rows, sourceName, importId, parseWarnings = []) {
+function commitTabularData(fields, rows, sourceName, importId, parseWarnings = [], sheetName = "") {
   if (!isCurrentImport(importId)) return;
   if (!fields.length || !rows.length) {
     showError("文件中没有可分析的数据。请确认数据包含表头和至少一行数据。", importId);
@@ -633,6 +638,12 @@ function commitTabularData(fields, rows, sourceName, importId, parseWarnings = [
   state.fields = fields;
   state.parseWarnings = parseWarnings;
   state.pendingExcel = null;
+  state.sourceFileName = sourceName;
+  state.sourceSheetName = sheetName;
+  state.sourceType = sheetName ? "excel" : "csv";
+  state.analysisCompletedAt = new Date();
+  state.insights = [];
+  state.customAnalysis = null;
   state.profiles = fields.map((field) => buildColumnProfile(field, rows));
   state.typeOverrides = {};
   state.fieldTypeDrafts = Object.fromEntries(
@@ -643,8 +654,9 @@ function commitTabularData(fields, rows, sourceName, importId, parseWarnings = [
   state.numericStats = buildNumericStats();
   state.categoryStats = buildCategoryStats();
 
-  dom.sourceName.textContent = `已载入 · ${sourceName}`;
-  dom.sourceName.title = sourceName;
+  const sourceDisplayName = sheetName ? `${sourceName} · ${sheetName}` : sourceName;
+  dom.sourceName.textContent = `已载入 · ${sourceDisplayName}`;
+  dom.sourceName.title = sourceDisplayName;
   dom.sheetSelectionPanel.classList.add("hidden");
   dom.results.classList.remove("hidden");
   if (state.parseWarnings.length) {
@@ -667,6 +679,7 @@ function commitTabularData(fields, rows, sourceName, importId, parseWarnings = [
   resetV2AnalysisState();
   renderTemplateMappingForm();
   resetTemplateResults("字段识别已完成。请选择分析模板并映射字段。");
+  updateExportButtons();
 }
 
 function buildColumnProfile(field, rows) {
@@ -844,6 +857,7 @@ function renderInsights() {
   if (!activeFields.length) {
     insights.push(`数据集包含 ${formatInteger(state.rows.length)} 行、${formatInteger(state.fields.length)} 个原始字段。`);
     insights.push("所有字段均已设为忽略，因此未生成统计、图表或字段相关的自动结论。");
+    state.insights = insights;
     dom.insights.innerHTML = insights.map((text) => `
       <div class="insight-item">${escapeHtml(text)}</div>
     `).join("");
@@ -879,6 +893,7 @@ function renderInsights() {
     insights.push("未识别到日期字段，因此未生成时间趋势结论。");
   }
 
+  state.insights = insights;
   dom.insights.innerHTML = insights.map((text) => `
     <div class="insight-item">${escapeHtml(text)}</div>
   `).join("");
@@ -1047,6 +1062,7 @@ function hasAutomaticTypeDifferences() {
 function updateFieldConfigActions() {
   dom.applyFieldConfig.disabled = !hasFieldConfigDraftChanges();
   dom.restoreAutoFieldTypes.disabled = !hasAutomaticTypeDifferences();
+  updateExportButtons();
 }
 
 function setFieldConfigMessage(message, tone = "") {
@@ -1061,6 +1077,8 @@ function ensureFieldConfigurationApplied(actionLabel) {
 }
 
 function rebuildAnalysisFromProfiles(fieldConfigMessage = "字段配置已更新。") {
+  state.analysisCompletedAt = null;
+  updateExportButtons();
   state.numericStats = buildNumericStats();
   state.categoryStats = buildCategoryStats();
   renderOverview();
@@ -1075,6 +1093,7 @@ function rebuildAnalysisFromProfiles(fieldConfigMessage = "字段配置已更新
   renderTemplateMappingForm();
   resetTemplateResults("字段类型已更新。请重新选择分析字段或模板映射。");
   setFieldConfigMessage(fieldConfigMessage, "success");
+  state.analysisCompletedAt = new Date();
   updateFieldConfigActions();
 }
 
@@ -1322,6 +1341,7 @@ function renderCustomAnalysisChart() {
 function resetV2AnalysisState() {
   destroyChart("v2TopGroupChart");
   destroyChart("v2SelectedTrendChart");
+  state.customAnalysis = null;
   dom.v2AnalysisResults.classList.add("hidden");
   dom.v2FieldPrompt.className = "analysis-prompt";
   dom.v2FieldPrompt.textContent = "请选择一个数值指标字段和一个分类分组字段，再点击“重新选择字段并分析”。时间字段为可选。";
@@ -1337,6 +1357,7 @@ function renderV2Analysis() {
 
   const validationMessage = getV2ValidationMessage(metricField, groupField, dateField);
   if (validationMessage) {
+    state.customAnalysis = null;
     dom.v2AnalysisResults.classList.add("hidden");
     dom.v2FieldPrompt.className = "analysis-prompt warning";
     dom.v2FieldPrompt.textContent = validationMessage;
@@ -1345,6 +1366,7 @@ function renderV2Analysis() {
 
   const grouped = buildV2GroupedStats(metricField, groupField);
   if (!grouped.length) {
+    state.customAnalysis = null;
     dom.v2AnalysisResults.classList.add("hidden");
     dom.v2FieldPrompt.className = "analysis-prompt warning";
     dom.v2FieldPrompt.textContent = "所选字段没有可计算的有效记录，请重新选择字段后再分析。";
@@ -1356,6 +1378,14 @@ function renderV2Analysis() {
     ? "已按所选字段生成分组汇总和时间趋势。"
     : "已按所选字段生成分组汇总；未选择时间字段，因此不生成时间趋势图。";
   dom.v2AnalysisResults.classList.remove("hidden");
+
+  state.customAnalysis = {
+    metricField,
+    groupField,
+    dateField,
+    grouped: grouped.map((item) => ({ ...item })),
+    trend: dateField ? buildMetricDateTrend(dateField, metricField) : null
+  };
 
   renderV2SummaryCards(metricField, groupField, dateField, grouped);
   renderV2AggregationTables(metricField, groupField, grouped);
@@ -2315,6 +2345,12 @@ function resetAnalysisState() {
   state.typeOverrides = {};
   state.fieldTypeDrafts = {};
   state.pendingExcel = null;
+  state.sourceFileName = "";
+  state.sourceSheetName = "";
+  state.sourceType = "";
+  state.analysisCompletedAt = null;
+  state.insights = [];
+  state.customAnalysis = null;
 
   dom.sourceName.textContent = "";
   dom.sourceName.removeAttribute("title");
@@ -2350,6 +2386,7 @@ function resetAnalysisState() {
   dom.templateResults.classList.add("hidden");
   dom.templateMappingForm.innerHTML = "";
   dom.results.classList.add("hidden");
+  updateExportButtons();
 }
 
 function destroyChart(id) {
@@ -2707,87 +2744,748 @@ function numericAxisLabel(field, fallbackLabel) {
     : fallbackLabel;
 }
 
-async function exportHtmlReport() {
-  if (!state.rows.length) {
-    showError("请先上传数据并生成分析报告。");
+const REPORT_CHART_TITLES = Object.freeze({
+  numericDistributionChart: "数值字段分布",
+  categoryTopChart: "分类字段 Top 10",
+  dateTrendChart: "日期字段趋势",
+  customAnalysisChart: "自定义分组图",
+  v2TopGroupChart: "自定义分析 Top 10 分组",
+  v2SelectedTrendChart: "自定义分析时间趋势",
+  templateMainChart: "场景模板主图",
+  templateSecondaryChart: "场景模板辅助图",
+  templateTrendChart: "场景模板时间趋势"
+});
+
+function canExportReport() {
+  return Boolean(
+    state.rows.length
+      && state.fields.length
+      && state.profiles.length
+      && state.analysisCompletedAt
+      && !hasFieldConfigDraftChanges()
+  );
+}
+
+function updateExportButtons() {
+  const disabled = !canExportReport();
+  [dom.exportHtmlReport, dom.exportMarkdownReport].filter(Boolean).forEach((button) => {
+    button.disabled = disabled;
+    button.setAttribute("aria-disabled", String(disabled));
+  });
+}
+
+function exportHtmlReport() {
+  exportAnalysisReport("html");
+}
+
+function exportMarkdownReport() {
+  exportAnalysisReport("md");
+}
+
+function exportAnalysisReport(format) {
+  if (!canExportReport()) {
+    if (state.rows.length && hasFieldConfigDraftChanges()) {
+      ensureFieldConfigurationApplied("导出报告");
+    } else {
+      setStatus("请先完成数据分析，再导出报告。", "warning");
+    }
+    updateExportButtons();
     return;
   }
-  if (!ensureFieldConfigurationApplied("导出 HTML 报告")) return;
 
-  const button = dom.exportHtmlReport;
-  button.disabled = true;
-  const originalLabel = button.textContent;
-  button.textContent = "正在导出...";
+  const buttons = [dom.exportHtmlReport, dom.exportMarkdownReport].filter(Boolean);
+  const labels = buttons.map((button) => button.textContent);
+  buttons.forEach((button) => {
+    button.disabled = true;
+  });
+  const activeButton = format === "md" ? dom.exportMarkdownReport : dom.exportHtmlReport;
+  if (activeButton) activeButton.textContent = "正在导出...";
+
   try {
-    const report = dom.results.cloneNode(true);
-    report.classList.remove("hidden");
-    report.querySelectorAll(".report-actions, .nav-new-analysis, .field-config-actions").forEach((element) => element.remove());
-
-    const originalCanvases = Array.from(dom.results.querySelectorAll("canvas"));
-    const clonedCanvases = Array.from(report.querySelectorAll("canvas"));
-    clonedCanvases.forEach((canvas, index) => {
-      const image = document.createElement("img");
-      image.className = "exported-chart-image";
-      image.alt = canvas.getAttribute("aria-label") || "分析图表";
-      try {
-        image.src = originalCanvases[index].toDataURL("image/png");
-      } catch {
-        image.alt = "图表无法嵌入导出文件";
-      }
-      canvas.replaceWith(image);
+    const exportedAt = new Date();
+    const reportData = buildReportData(exportedAt);
+    const chartImages = format === "html" ? captureCurrentChartImages() : [];
+    const content = format === "html"
+      ? buildHtmlReport(reportData, chartImages)
+      : buildMarkdownReport(reportData);
+    const fileName = buildReportFileName(format, exportedAt);
+    const mimeType = format === "html"
+      ? "text/html;charset=utf-8"
+      : "text/markdown;charset=utf-8";
+    downloadReportFile(content, fileName, mimeType);
+    setStatus(`${format === "html" ? "HTML" : "Markdown"} 报告已生成：${fileName}`, "success");
+  } catch (error) {
+    setStatus(`报告导出失败：${error.message}`, "error");
+  } finally {
+    buttons.forEach((button, index) => {
+      button.textContent = labels[index];
     });
+    updateExportButtons();
+  }
+}
 
-    report.querySelectorAll("select").forEach((select) => {
-      const value = document.createElement("span");
-      value.className = "exported-select-value";
-      value.textContent = select.options[select.selectedIndex]?.text || "未选择";
-      select.replaceWith(value);
-    });
+function downloadReportFile(content, fileName, mimeType) {
+  const blob = new Blob(["\uFEFF", content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
-    let stylesheet = "";
+function captureCurrentChartImages() {
+  const knownIds = Object.keys(REPORT_CHART_TITLES);
+  const chartIds = [
+    ...knownIds,
+    ...Object.keys(state.charts).filter((id) => !knownIds.includes(id))
+  ];
+
+  return chartIds.flatMap((id) => {
+    const chart = state.charts[id];
+    if (!chart) return [];
+    const canvas = chart.canvas || document.getElementById(id);
+    if (!canvas) return [];
+    if (typeof canvas.closest === "function" && canvas.closest(".hidden")) return [];
+
     try {
-      const response = await fetch("style.css");
-      if (response.ok) stylesheet = await response.text();
+      if (typeof chart.stop === "function") chart.stop();
+      if (typeof chart.update === "function") chart.update("none");
+      const dataUrl = typeof chart.toBase64Image === "function"
+        ? chart.toBase64Image()
+        : canvas.toDataURL("image/png");
+      if (!isSafeChartDataUrl(dataUrl)) return [];
+      return [{
+        id,
+        title: REPORT_CHART_TITLES[id] || chart.data?.datasets?.[0]?.label || "分析图表",
+        dataUrl
+      }];
     } catch {
-      stylesheet = "";
+      return [];
+    }
+  });
+}
+
+function isSafeChartDataUrl(value) {
+  return /^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(String(value || ""));
+}
+
+function buildReportData(now = new Date()) {
+  const exportedAt = normalizeReportDate(now, new Date());
+  const analysisAt = normalizeReportDate(state.analysisCompletedAt, exportedAt);
+  const activeProfiles = getActiveProfiles();
+  const fieldTypes = state.profiles.map((profile) => ({
+    field: profile.field,
+    inferredType: profile.inferredType,
+    appliedType: profile.type,
+    typeKey: profile.typeKey,
+    nonMissingCount: profile.nonMissingCount,
+    uniqueCount: profile.uniqueCount,
+    missingCount: profile.missingCount,
+    missingRate: formatPercent(profile.missingRate),
+    conversionFailureCount: profile.conversionFailureCount || 0,
+    sampleValues: [...profile.sampleValues]
+  }));
+  const numericStats = state.numericStats.map((stat) => ({
+    field: stat.field,
+    count: stat.count,
+    mean: formatFieldNumber(stat.field, stat.mean),
+    median: formatFieldNumber(stat.field, stat.median),
+    min: formatFieldNumber(stat.field, stat.min),
+    max: formatFieldNumber(stat.field, stat.max),
+    standardDeviation: formatFieldNumber(stat.field, stat.std),
+    outlierCount: stat.outlierCount
+  }));
+  const categoryStats = state.categoryStats.map((category) => ({
+    field: category.field,
+    total: category.total,
+    top: category.top.slice(0, 10).map((item) => ({
+      name: item.name,
+      count: item.count,
+      ratio: formatPercent(item.ratio)
+    }))
+  }));
+
+  return {
+    version: "V2.3",
+    fileName: getReportSourceFileName(),
+    sheetName: state.sourceSheetName || "",
+    sourceType: state.sourceType || (state.sourceSheetName ? "excel" : "csv"),
+    analysisTime: formatReportDateTime(analysisAt),
+    analysisTimeIso: analysisAt.toISOString(),
+    exportTime: formatReportDateTime(exportedAt),
+    dataScale: {
+      rows: state.rows.length,
+      fields: state.fields.length,
+      activeFields: activeProfiles.length,
+      numericFields: getProfilesByType("numeric").length,
+      categoryFields: getProfilesByType("category").length,
+      dateFields: getProfilesByType("date").length,
+      idFields: getProfilesByType("id").length,
+      ignoredFields: getProfilesByType("ignore").length
+    },
+    fieldTypes,
+    quality: {
+      totalMissing: state.totalMissing,
+      duplicateRows: state.duplicateRows,
+      parseWarningCount: state.parseWarnings.length,
+      parseWarnings: state.parseWarnings.slice(0, 50).map((warning) => ({
+        row: warning.row ?? "",
+        message: warning.message || warning.code || warning.type || "CSV 解析警告"
+      })),
+      missingByField: state.profiles.map((profile) => ({
+        field: profile.field,
+        type: profile.type,
+        missingCount: profile.missingCount,
+        missingRate: formatPercent(profile.missingRate)
+      })),
+      outliers: state.numericStats.map((stat) => ({
+        field: stat.field,
+        outlierCount: stat.outlierCount,
+        lowerBound: formatFieldNumber(stat.field, stat.lowerBound),
+        upperBound: formatFieldNumber(stat.field, stat.upperBound)
+      }))
+    },
+    numericStats,
+    categoryStats,
+    dateTrends: buildReportDateTrends(),
+    customAnalysis: buildReportCustomAnalysis(),
+    insights: [...state.insights]
+  };
+}
+
+function getReportSourceFileName() {
+  if (state.sourceFileName) return state.sourceFileName;
+  const sourceTitle = dom.sourceName?.title || dom.sourceName?.textContent || "";
+  return sourceTitle.replace(/^已载入\s*·\s+/, "").split(" · ")[0] || "data-report";
+}
+
+function buildReportDateTrends() {
+  const metricField = state.numericStats[0]?.field || "";
+  return getProfilesByType("date").map((profile) => {
+    const trend = buildDateTrend(profile.field, metricField);
+    if (!trend.labels.length) {
+      return {
+        field: profile.field,
+        metricField,
+        pointCount: 0,
+        labels: [],
+        values: [],
+        start: "",
+        end: "",
+        summary: `日期字段「${profile.field}」没有可安全转换的有效日期。`
+      };
     }
 
-    const sourceLabel = dom.sourceName.textContent.replace(/^已载入\s*·\s*/, "") || "data-report";
-    const safeTitle = escapeHtml(`Smart CSV Analyzer - ${sourceLabel}`);
-    const html = `<!DOCTYPE html>
+    const firstValue = trend.values[0];
+    const lastValue = trend.values[trend.values.length - 1];
+    const valueLabel = metricField ? `${metricField}平均值` : "记录数";
+    const firstDisplay = metricField
+      ? formatFieldNumber(metricField, firstValue)
+      : formatInteger(firstValue);
+    const lastDisplay = metricField
+      ? formatFieldNumber(metricField, lastValue)
+      : formatInteger(lastValue);
+    let direction = "仅有一个时间点";
+    if (trend.values.length > 1) {
+      direction = lastValue > firstValue ? "整体上升" : lastValue < firstValue ? "整体下降" : "整体持平";
+    }
+
+    return {
+      field: profile.field,
+      metricField,
+      pointCount: trend.labels.length,
+      labels: [...trend.labels],
+      values: [...trend.values],
+      start: trend.labels[0],
+      end: trend.labels[trend.labels.length - 1],
+      summary: `日期字段「${profile.field}」包含 ${formatInteger(trend.labels.length)} 个时间点；${valueLabel}从 ${trend.labels[0]} 的 ${firstDisplay} 变为 ${trend.labels[trend.labels.length - 1]} 的 ${lastDisplay}，${direction}。`
+    };
+  });
+}
+
+function buildReportCustomAnalysis() {
+  let current = state.customAnalysis;
+  if (!current) {
+    const metricField = dom.metricField?.value || "";
+    const groupField = dom.groupField?.value || "";
+    const metricIsValid = getProfilesByType("numeric").some((profile) => profile.field === metricField);
+    const groupIsValid = getProfilesByType("category").some((profile) => profile.field === groupField);
+    if (metricIsValid && groupIsValid) {
+      const grouped = groupNumericFieldByCategory(metricField, groupField);
+      if (grouped.length) {
+        current = { metricField, groupField, dateField: "", grouped, trend: null };
+      }
+    }
+  }
+
+  if (!current || !Array.isArray(current.grouped) || !current.grouped.length) {
+    return {
+      completed: false,
+      message: "当前没有可导出的自定义分组分析结果。"
+    };
+  }
+
+  const rows = current.grouped.map((item) => ({
+    group: item.name,
+    count: item.count,
+    sum: formatFieldNumber(current.metricField, item.sum),
+    average: formatFieldNumber(current.metricField, item.avg),
+    minimum: formatFieldNumber(current.metricField, item.min),
+    maximum: formatFieldNumber(current.metricField, item.max)
+  }));
+  const trendSummary = current.dateField
+    ? summarizeCustomTrend(current.dateField, current.metricField, current.trend)
+    : "";
+
+  return {
+    completed: true,
+    metricField: current.metricField,
+    groupField: current.groupField,
+    dateField: current.dateField || "",
+    rows,
+    trendSummary
+  };
+}
+
+function summarizeCustomTrend(dateField, metricField, trend) {
+  if (!trend?.labels?.length) {
+    return `日期字段「${dateField}」没有足够的有效记录生成自定义趋势。`;
+  }
+  const first = trend.values[0];
+  const last = trend.values[trend.values.length - 1];
+  const direction = trend.values.length < 2
+    ? "仅有一个时间点"
+    : last > first ? "整体上升" : last < first ? "整体下降" : "整体持平";
+  return `按「${dateField}」观察，「${metricField}」求和值从 ${trend.labels[0]} 的 ${formatFieldNumber(metricField, first)} 变为 ${trend.labels[trend.labels.length - 1]} 的 ${formatFieldNumber(metricField, last)}，${direction}。`;
+}
+
+function normalizeReportSnapshot(reportData = {}) {
+  const quality = reportData.quality || {};
+  const dataScale = reportData.dataScale || {};
+  return {
+    ...reportData,
+    version: reportData.version || "V2.3",
+    fileName: reportData.fileName || "data-report",
+    sheetName: reportData.sheetName || "",
+    analysisTime: reportData.analysisTime || "—",
+    exportTime: reportData.exportTime || "—",
+    dataScale: {
+      rows: 0,
+      fields: 0,
+      activeFields: 0,
+      numericFields: 0,
+      categoryFields: 0,
+      dateFields: 0,
+      idFields: 0,
+      ignoredFields: 0,
+      ...dataScale
+    },
+    fieldTypes: (reportData.fieldTypes || []).map((field) => ({
+      ...field,
+      inferredType: field.inferredType || field.type || "—",
+      appliedType: field.appliedType || field.type || "—",
+      nonMissingCount: field.nonMissingCount ?? 0,
+      uniqueCount: field.uniqueCount ?? 0,
+      missingCount: field.missingCount ?? 0,
+      conversionFailureCount: field.conversionFailureCount ?? 0,
+      sampleValues: Array.isArray(field.sampleValues) ? field.sampleValues : []
+    })),
+    quality: {
+      ...quality,
+      totalMissing: quality.totalMissing ?? 0,
+      duplicateRows: quality.duplicateRows ?? 0,
+      parseWarnings: Array.isArray(quality.parseWarnings) ? quality.parseWarnings : [],
+      parseWarningCount: quality.parseWarningCount ?? quality.parseWarnings?.length ?? 0,
+      missingByField: Array.isArray(quality.missingByField)
+        ? quality.missingByField
+        : Array.isArray(quality.fields) ? quality.fields : [],
+      outliers: Array.isArray(quality.outliers) ? quality.outliers : []
+    },
+    numericStats: Array.isArray(reportData.numericStats) ? reportData.numericStats : [],
+    categoryStats: Array.isArray(reportData.categoryStats) ? reportData.categoryStats : [],
+    dateTrends: Array.isArray(reportData.dateTrends) ? reportData.dateTrends : [],
+    customAnalysis: reportData.customAnalysis || {
+      completed: false,
+      message: "当前没有可导出的自定义分组分析结果。"
+    },
+    insights: Array.isArray(reportData.insights) ? reportData.insights : []
+  };
+}
+
+function buildHtmlReport(reportData, chartImages = []) {
+  reportData = normalizeReportSnapshot(reportData);
+  const safeCharts = chartImages.filter((chart) => isSafeChartDataUrl(chart.dataUrl));
+  const sheetMeta = reportData.sheetName
+    ? `<div><dt>工作表名称</dt><dd>${escapeHtml(reportData.sheetName)}</dd></div>`
+    : "";
+  const categorySections = reportData.categoryStats.length
+    ? reportData.categoryStats.map((category) => `
+      <section class="subsection">
+        <h3>${escapeHtml(category.field)} Top 10</h3>
+        ${buildHtmlReportTable(
+          ["类别", "数量", "占比"],
+          category.top.map((item) => [item.name, item.count, item.ratio]),
+          "该分类字段没有可统计的非空值。"
+        )}
+      </section>
+    `).join("")
+    : `<p class="empty">无适用的分类字段。</p>`;
+  const dateTrendItems = reportData.dateTrends.length
+    ? `<ul class="summary-list">${reportData.dateTrends.map((trend) => `<li>${escapeHtml(trend.summary)}</li>`).join("")}</ul>`
+    : `<p class="empty">无适用的日期字段。</p>`;
+  const customSection = reportData.customAnalysis.completed
+    ? `
+      <p><strong>指标字段：</strong>${escapeHtml(reportData.customAnalysis.metricField)}　
+      <strong>分组字段：</strong>${escapeHtml(reportData.customAnalysis.groupField)}
+      ${reportData.customAnalysis.dateField ? `　<strong>日期字段：</strong>${escapeHtml(reportData.customAnalysis.dateField)}` : ""}</p>
+      ${reportData.customAnalysis.trendSummary ? `<p>${escapeHtml(reportData.customAnalysis.trendSummary)}</p>` : ""}
+      ${buildHtmlReportTable(
+        [reportData.customAnalysis.groupField, "记录数", "求和", "平均值", "最小值", "最大值"],
+        reportData.customAnalysis.rows.map((row) => [row.group, row.count, row.sum, row.average, row.minimum, row.maximum]),
+        "当前没有可导出的自定义分组分析结果。"
+      )}
+    `
+    : `<p class="empty">${escapeHtml(reportData.customAnalysis.message)}</p>`;
+  const chartSection = safeCharts.length
+    ? `<div class="chart-list">${safeCharts.map((chart) => `
+        <figure>
+          <figcaption>${escapeHtml(chart.title)}</figcaption>
+          <img src="${chart.dataUrl}" alt="${escapeHtml(chart.title)}">
+        </figure>
+      `).join("")}</div>`
+    : `<p class="empty">当前没有可嵌入的图表。</p>`;
+
+  return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${safeTitle}</title>
-  <style>${stylesheet}
-    body { padding: 24px; background: #f5f6fa; }
-    .results { display: block; max-width: 1240px; margin: 0 auto; }
-    .results-nav { position: static; }
-    .exported-chart-image { display: block; width: 100%; height: auto; }
-    .exported-select-value { font-weight: 650; }
+  <title>${escapeHtml(`${reportData.fileName} - 数据分析报告`)}</title>
+  <style>
+    :root { color-scheme: light; --ink: #23263a; --muted: #686f82; --line: #dfe2ea; --panel: #ffffff; --accent: #625bde; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 32px 20px; color: var(--ink); background: #f4f5f9; font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; line-height: 1.6; }
+    main { max-width: 1120px; margin: 0 auto; }
+    header, section { margin-bottom: 20px; padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+    header { border-top: 5px solid var(--accent); }
+    h1, h2, h3 { margin: 0 0 14px; line-height: 1.3; }
+    h1 { font-size: 28px; }
+    h2 { padding-bottom: 9px; border-bottom: 1px solid var(--line); font-size: 20px; }
+    h3 { font-size: 16px; }
+    .meta, .scale-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+    .meta div, .scale-card { padding: 12px; border-radius: 9px; background: #f7f7fb; }
+    dt, .label { color: var(--muted); font-size: 12px; }
+    dd { margin: 3px 0 0; font-weight: 650; overflow-wrap: anywhere; }
+    .value { margin-top: 3px; font-size: 20px; font-weight: 720; }
+    .table-wrap { width: 100%; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 9px 10px; border: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+    th { background: #f0efff; }
+    .subsection + .subsection { margin-top: 22px; }
+    .summary-list, .insights { margin: 0; padding-left: 22px; }
+    .summary-list li, .insights li { margin: 7px 0; }
+    .empty { margin: 0; padding: 12px; border-radius: 8px; color: var(--muted); background: #f7f7fb; }
+    .chart-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+    figure { margin: 0; padding: 14px; border: 1px solid var(--line); border-radius: 10px; }
+    figcaption { margin-bottom: 10px; font-weight: 650; }
+    img { display: block; width: 100%; height: auto; }
+    footer { color: var(--muted); text-align: center; font-size: 12px; }
+    @media (max-width: 640px) { body { padding: 14px 8px; } header, section { padding: 16px; } .chart-list { grid-template-columns: 1fr; } }
+    @media print { body { padding: 0; background: #fff; } header, section { break-inside: avoid; box-shadow: none; } }
   </style>
 </head>
 <body>
-  ${report.outerHTML}
-  <footer class="app-footer"><p>导出时间：${escapeHtml(new Date().toLocaleString("zh-CN"))}</p></footer>
+<main>
+  <header>
+    <h1>数据分析报告</h1>
+    <dl class="meta">
+      <div><dt>文件名称</dt><dd>${escapeHtml(reportData.fileName)}</dd></div>
+      ${sheetMeta}
+      <div><dt>分析时间</dt><dd>${escapeHtml(reportData.analysisTime)}</dd></div>
+      <div><dt>报告生成时间</dt><dd>${escapeHtml(reportData.exportTime)}</dd></div>
+    </dl>
+  </header>
+  <section>
+    <h2>数据规模</h2>
+    <div class="scale-grid">
+      ${[
+        ["数据行数", reportData.dataScale.rows],
+        ["字段总数", reportData.dataScale.fields],
+        ["参与分析字段", reportData.dataScale.activeFields],
+        ["数值字段", reportData.dataScale.numericFields],
+        ["分类字段", reportData.dataScale.categoryFields],
+        ["日期字段", reportData.dataScale.dateFields],
+        ["ID 字段", reportData.dataScale.idFields],
+        ["忽略字段", reportData.dataScale.ignoredFields]
+      ].map(([label, value]) => `<div class="scale-card"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value)}</div></div>`).join("")}
+    </div>
+  </section>
+  <section>
+    <h2>字段类型结果</h2>
+    ${buildHtmlReportTable(
+      ["字段名", "自动识别类型", "最终类型", "非空值", "唯一值", "缺失值", "转换失败", "示例值"],
+      reportData.fieldTypes.map((field) => [
+        field.field,
+        field.inferredType,
+        field.appliedType,
+        field.nonMissingCount,
+        field.uniqueCount,
+        field.missingCount,
+        field.conversionFailureCount,
+        field.sampleValues.join("、") || "—"
+      ]),
+      "无字段类型结果。"
+    )}
+  </section>
+  <section>
+    <h2>数据质量报告</h2>
+    <p>缺失值总数：<strong>${escapeHtml(reportData.quality.totalMissing)}</strong>；重复行：<strong>${escapeHtml(reportData.quality.duplicateRows)}</strong>；解析警告：<strong>${escapeHtml(reportData.quality.parseWarningCount)}</strong>。</p>
+    <h3>各字段缺失情况</h3>
+    ${buildHtmlReportTable(
+      ["字段", "类型", "缺失值", "缺失率"],
+      reportData.quality.missingByField.map((item) => [item.field, item.type, item.missingCount, item.missingRate]),
+      "无字段质量结果。"
+    )}
+    <h3>数值异常值</h3>
+    ${buildHtmlReportTable(
+      ["字段", "异常值数量", "下界", "上界"],
+      reportData.quality.outliers.map((item) => [item.field, item.outlierCount, item.lowerBound, item.upperBound]),
+      "未识别到数值字段，暂无可用数值统计。"
+    )}
+  </section>
+  <section>
+    <h2>数值字段描述性统计</h2>
+    ${buildHtmlReportTable(
+      ["字段", "有效数量", "平均值", "中位数", "最小值", "最大值", "标准差"],
+      reportData.numericStats.map((item) => [item.field, item.count, item.mean, item.median, item.min, item.max, item.standardDeviation]),
+      "未识别到数值字段，暂无可用数值统计。"
+    )}
+  </section>
+  <section>
+    <h2>分类字段 Top 10</h2>
+    ${categorySections}
+  </section>
+  <section>
+    <h2>日期趋势摘要</h2>
+    ${dateTrendItems}
+  </section>
+  <section>
+    <h2>自定义分组分析结果</h2>
+    ${customSection}
+  </section>
+  <section>
+    <h2>当前图表</h2>
+    ${chartSection}
+  </section>
+  <section>
+    <h2>自动分析结论</h2>
+    ${reportData.insights.length
+      ? `<ol class="insights">${reportData.insights.map((insight) => `<li>${escapeHtml(insight)}</li>`).join("")}</ol>`
+      : `<p class="empty">暂无自动分析结论。</p>`}
+  </section>
+  <footer>由 Smart CSV Analyzer ${escapeHtml(reportData.version)} 在浏览器本地生成；数据未上传。</footer>
+</main>
 </body>
 </html>`;
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${sanitizeFileName(sourceLabel)}-分析报告.html`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  } catch (error) {
-    setStatus(`报告导出失败：${error.message}`, "error");
-  } finally {
-    button.disabled = false;
-    button.textContent = originalLabel;
+}
+
+function buildHtmlReportTable(headers, rows, emptyMessage) {
+  if (!rows.length) return `<p class="empty">${escapeHtml(emptyMessage)}</p>`;
+  return `<div class="table-wrap"><table>
+    <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody>
+  </table></div>`;
+}
+
+function buildMarkdownReport(reportData) {
+  reportData = normalizeReportSnapshot(reportData);
+  const lines = [
+    "# 数据分析报告",
+    "",
+    `- 文件名称：${escapeMarkdownText(reportData.fileName)}`,
+    ...(reportData.sheetName ? [`- 工作表名称：${escapeMarkdownText(reportData.sheetName)}`] : []),
+    `- 分析时间：${escapeMarkdownText(reportData.analysisTime)}`,
+    `- 报告生成时间：${escapeMarkdownText(reportData.exportTime)}`,
+    "",
+    "## 数据规模",
+    "",
+    buildMarkdownTable(
+      ["指标", "数量"],
+      [
+        ["数据行数", reportData.dataScale.rows],
+        ["字段总数", reportData.dataScale.fields],
+        ["参与分析字段", reportData.dataScale.activeFields],
+        ["数值字段", reportData.dataScale.numericFields],
+        ["分类字段", reportData.dataScale.categoryFields],
+        ["日期字段", reportData.dataScale.dateFields],
+        ["ID 字段", reportData.dataScale.idFields],
+        ["忽略字段", reportData.dataScale.ignoredFields]
+      ]
+    ),
+    "",
+    "## 字段类型结果",
+    "",
+    reportData.fieldTypes.length
+      ? buildMarkdownTable(
+        ["字段名", "自动识别类型", "最终类型", "非空值", "唯一值", "缺失值", "转换失败", "示例值"],
+        reportData.fieldTypes.map((field) => [
+          field.field,
+          field.inferredType,
+          field.appliedType,
+          field.nonMissingCount,
+          field.uniqueCount,
+          field.missingCount,
+          field.conversionFailureCount,
+          field.sampleValues.join("、") || "—"
+        ])
+      )
+      : "无字段类型结果。",
+    "",
+    "## 数据质量报告",
+    "",
+    `- 缺失值总数：${reportData.quality.totalMissing}`,
+    `- 重复行：${reportData.quality.duplicateRows}`,
+    `- 解析警告：${reportData.quality.parseWarningCount}`,
+    "",
+    "### 各字段缺失情况",
+    "",
+    reportData.quality.missingByField.length
+      ? buildMarkdownTable(
+        ["字段", "类型", "缺失值", "缺失率"],
+        reportData.quality.missingByField.map((item) => [item.field, item.type, item.missingCount, item.missingRate])
+      )
+      : "无字段质量结果。",
+    "",
+    "### 数值异常值",
+    "",
+    reportData.quality.outliers.length
+      ? buildMarkdownTable(
+        ["字段", "异常值数量", "下界", "上界"],
+        reportData.quality.outliers.map((item) => [item.field, item.outlierCount, item.lowerBound, item.upperBound])
+      )
+      : "未识别到数值字段，暂无可用数值统计。",
+    "",
+    "## 数值字段描述性统计",
+    "",
+    reportData.numericStats.length
+      ? buildMarkdownTable(
+        ["字段", "有效数量", "平均值", "中位数", "最小值", "最大值", "标准差"],
+        reportData.numericStats.map((item) => [item.field, item.count, item.mean, item.median, item.min, item.max, item.standardDeviation])
+      )
+      : "未识别到数值字段，暂无可用数值统计。",
+    "",
+    "## 分类字段 Top 10",
+    ""
+  ];
+
+  if (reportData.categoryStats.length) {
+    reportData.categoryStats.forEach((category) => {
+      lines.push(
+        `### ${escapeMarkdownText(category.field)}`,
+        "",
+        category.top.length
+          ? buildMarkdownTable(
+            ["类别", "数量", "占比"],
+            category.top.map((item) => [item.name, item.count, item.ratio])
+          )
+          : "该分类字段没有可统计的非空值。",
+        ""
+      );
+    });
+  } else {
+    lines.push("无适用的分类字段。", "");
   }
+
+  lines.push("## 日期趋势摘要", "");
+  if (reportData.dateTrends.length) {
+    reportData.dateTrends.forEach((trend) => {
+      lines.push(`- ${escapeMarkdownText(trend.summary)}`);
+    });
+  } else {
+    lines.push("无适用的日期字段。");
+  }
+
+  lines.push("", "## 自定义分组分析结果", "");
+  if (reportData.customAnalysis.completed) {
+    lines.push(
+      `- 指标字段：${escapeMarkdownText(reportData.customAnalysis.metricField)}`,
+      `- 分组字段：${escapeMarkdownText(reportData.customAnalysis.groupField)}`,
+      ...(reportData.customAnalysis.dateField ? [`- 日期字段：${escapeMarkdownText(reportData.customAnalysis.dateField)}`] : []),
+      ...(reportData.customAnalysis.trendSummary ? [`- ${escapeMarkdownText(reportData.customAnalysis.trendSummary)}`] : []),
+      "",
+      buildMarkdownTable(
+        [reportData.customAnalysis.groupField, "记录数", "求和", "平均值", "最小值", "最大值"],
+        reportData.customAnalysis.rows.map((row) => [row.group, row.count, row.sum, row.average, row.minimum, row.maximum])
+      )
+    );
+  } else {
+    lines.push(escapeMarkdownText(reportData.customAnalysis.message));
+  }
+
+  lines.push("", "## 自动分析结论", "");
+  if (reportData.insights.length) {
+    reportData.insights.forEach((insight, index) => {
+      lines.push(`${index + 1}. ${escapeMarkdownText(insight)}`);
+    });
+  } else {
+    lines.push("暂无自动分析结论。");
+  }
+  lines.push("", `> 由 Smart CSV Analyzer ${escapeMarkdownText(reportData.version)} 在浏览器本地生成；数据未上传。`, "");
+  return lines.join("\n");
+}
+
+function buildMarkdownTable(headers, rows) {
+  const headerLine = `| ${headers.map(escapeMarkdownCell).join(" | ")} |`;
+  const separatorLine = `| ${headers.map(() => "---").join(" | ")} |`;
+  const bodyLines = rows.map((row) => `| ${row.map(escapeMarkdownCell).join(" | ")} |`);
+  return [headerLine, separatorLine, ...bodyLines].join("\n");
+}
+
+function escapeMarkdownCell(value) {
+  return String(value ?? "")
+    .replace(/\\/g, "\\\\")
+    .replace(/\|/g, "\\|")
+    .replace(/\r?\n/g, "<br>")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function escapeMarkdownText(value) {
+  return escapeMarkdownCell(value)
+    .replace(/([*_`#[\]])/g, "\\$1");
+}
+
+function buildReportFileName(extension, now = new Date()) {
+  const safeExtension = String(extension || "html").replace(/^\./, "").toLowerCase() === "md"
+    ? "md"
+    : "html";
+  const originalName = getReportSourceFileName().split(/[\\/]/).pop() || "data-report";
+  const stem = originalName.replace(/\.(?:csv|xlsx|xls)$/i, "") || "data-report";
+  return `${sanitizeFileName(stem)}-${formatReportFileTimestamp(now)}.${safeExtension}`;
+}
+
+function normalizeReportDate(value, fallback = new Date()) {
+  const parsed = value instanceof Date ? new Date(value.getTime()) : value ? new Date(value) : null;
+  if (parsed && !Number.isNaN(parsed.getTime())) return parsed;
+  const fallbackDate = fallback instanceof Date ? new Date(fallback.getTime()) : new Date(fallback);
+  return Number.isNaN(fallbackDate.getTime()) ? new Date() : fallbackDate;
+}
+
+function formatReportDateTime(value) {
+  const date = normalizeReportDate(value);
+  return `${date.getFullYear()}-${padReportNumber(date.getMonth() + 1)}-${padReportNumber(date.getDate())} ${padReportNumber(date.getHours())}:${padReportNumber(date.getMinutes())}:${padReportNumber(date.getSeconds())}`;
+}
+
+function formatReportFileTimestamp(value) {
+  const date = normalizeReportDate(value);
+  return `${date.getFullYear()}${padReportNumber(date.getMonth() + 1)}${padReportNumber(date.getDate())}-${padReportNumber(date.getHours())}${padReportNumber(date.getMinutes())}${padReportNumber(date.getSeconds())}`;
+}
+
+function padReportNumber(value) {
+  return String(value).padStart(2, "0");
 }
 
 function sanitizeFileName(value) {

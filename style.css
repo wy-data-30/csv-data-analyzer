@@ -616,7 +616,7 @@ select:disabled {
 
 .section-note {
   margin: -4px 0 16px;
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 13px;
   line-height: 1.7;
 }
@@ -635,7 +635,7 @@ select:disabled {
 
 .field-config-message {
   margin: 0;
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -663,7 +663,7 @@ select:disabled {
 .schema-type-select {
   min-width: 118px;
   padding: 7px 30px 7px 10px;
-  border-color: var(--border);
+  border-color: var(--line);
   border-radius: 8px;
   background-color: #fff;
   font-size: 12px;
@@ -716,7 +716,7 @@ select:disabled {
 .report-actions button {
   width: 100%;
   padding: 9px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 9px;
   background: #fff;
   color: var(--text);
@@ -821,7 +821,7 @@ select:disabled {
   display: grid;
   gap: 6px;
   min-width: 220px;
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 650;
 }
@@ -838,7 +838,7 @@ select:disabled {
   grid-column: 1 / -1;
   min-height: 0;
   margin: 0;
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 13px;
 }
 
@@ -869,7 +869,9 @@ select:disabled {
   top: 92px;
   grid-column: 1;
   grid-row: 1 / span 7;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: calc(100vh - 104px);
   padding: 18px 12px 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -1579,6 +1581,8 @@ label.file-button:focus-within {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
+    overflow-y: hidden;
+    max-height: none;
     padding: 9px;
   }
 
@@ -1889,6 +1893,20 @@ label.file-button:focus-within {
   .upload-meta {
     align-items: center;
     flex-direction: column;
+  }
+
+  .report-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .report-actions-copy {
+    grid-column: auto;
+  }
+
+  .frequency-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 6px;
+    padding: 9px 10px;
   }
 
   .metric-grid,

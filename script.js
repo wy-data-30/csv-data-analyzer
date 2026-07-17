@@ -594,25 +594,48 @@ function decodeText(buffer, encoding, fatal = false) {
 function handleParsedData(results, sourceName, importId) {
   if (!isCurrentImport(importId)) return;
   const parseErrors = Array.isArray(results.errors) ? results.errors : [];
-  const fatalError = parseErrors.find((error) => error.type === "Delimiter" || error.code === "MissingQuotes");
+  const fatalError = parseErrors.find((error) =>
+    error.code === "MissingQuotes"
+    || (error.type === "Delimiter" && error.code !== "UndetectableDelimiter")
+  );
   if (fatalError) {
     showError(`CSV 解析失败：${fatalError.message}`, importId);
     return;
   }
 
-  const parseWarnings = parseErrors.slice(0, 20).map((error) => ({
-    row: Number.isInteger(error.row) ? error.row + 2 : null,
-    code: error.code || "ParseWarning",
-    message: error.message || "CSV 行结构异常"
+  const allFieldPairs = (results.meta?.fields || []).map((rawField) => ({
+    raw: rawField,
+    clean: normalizeFieldName(rawField)
   }));
-  const fieldPairs = (results.meta.fields || [])
-    .map((rawField) => ({
-      raw: rawField,
-      clean: normalizeFieldName(rawField)
-    }))
-    .filter((pair) => pair.clean.trim() !== "");
+  const fieldPairs = allFieldPairs.filter((pair) => pair.clean !== "");
   const fields = fieldPairs.map((pair) => pair.clean);
-  const normalizedRows = (results.data || []).map((row) =>
+  const duplicateFields = [...new Set(
+    fields.filter((field, index) => fields.indexOf(field) !== index)
+  )];
+
+  if (duplicateFields.length) {
+    showError(`CSV 表头规范化后存在重复字段：${duplicateFields.join("、")}。请修改表头后重试。`, importId);
+    return;
+  }
+
+  const sourceRows = Array.isArray(results.data) ? results.data : [];
+  const blankHeaderHasData = allFieldPairs
+    .filter((pair) => pair.clean === "")
+    .some((pair) => sourceRows.some((row) => !isMissing(row?.[pair.raw])));
+  if (blankHeaderHasData) {
+    showError("CSV 存在缺少表头的数据列。请补全每一列的字段名后重试。", importId);
+    return;
+  }
+
+  const parseWarnings = parseErrors
+    .filter((error) => !(error.code === "UndetectableDelimiter" && fields.length === 1))
+    .slice(0, 20)
+    .map((error) => ({
+      row: Number.isInteger(error.row) ? error.row + 2 : null,
+      code: error.code || "ParseWarning",
+      message: error.message || "CSV 行结构异常"
+    }));
+  const normalizedRows = sourceRows.map((row) =>
     normalizeParsedRow(row, fieldPairs)
   );
   const rows = normalizedRows.filter((row) =>

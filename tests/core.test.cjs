@@ -51,6 +51,37 @@ const context = vm.createContext({
 const source = fs.readFileSync(path.join(__dirname, "..", "script.js"), "utf8");
 vm.runInContext(source, context, { filename: "script.js" });
 
+const projectRoot = path.join(__dirname, "..");
+const htmlSource = fs.readFileSync(path.join(projectRoot, "index.html"), "utf8");
+const styleSource = fs.readFileSync(path.join(projectRoot, "style.css"), "utf8");
+const definedCssVariables = new Set(
+  [...styleSource.matchAll(/--([\w-]+)\s*:/g)].map((match) => match[1])
+);
+const missingCssVariables = [...new Set(
+  [...styleSource.matchAll(/var\(--([\w-]+)\)/g)]
+    .map((match) => match[1])
+    .filter((name) => !definedCssVariables.has(name))
+)].sort();
+assert.deepEqual(missingCssVariables, []);
+
+const localAssetReferences = [...htmlSource.matchAll(/(?:src|href)="([^"]+)"/g)]
+  .map((match) => match[1])
+  .filter((reference) => !/^(?:https?:|data:|#|mailto:|javascript:)/i.test(reference));
+assert.ok(localAssetReferences.length > 0);
+localAssetReferences.forEach((reference) => {
+  assert.equal(reference.startsWith("/"), false, `root-relative asset is not Pages-safe: ${reference}`);
+  const localPath = reference.split(/[?#]/, 1)[0];
+  assert.equal(fs.existsSync(path.join(projectRoot, localPath)), true, `missing local asset: ${reference}`);
+});
+assert.match(source, /fetch\("sample-data\.csv"\)/);
+
+const mobile420Start = styleSource.indexOf("@media (max-width: 420px)");
+const mobile420End = styleSource.indexOf("@media (prefers-reduced-motion", mobile420Start);
+const mobile420Source = styleSource.slice(mobile420Start, mobile420End);
+assert.match(mobile420Source, /\.report-actions\s*\{[^}]*grid-template-columns:\s*1fr;/s);
+assert.match(mobile420Source, /\.frequency-row\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+auto;/s);
+assert.match(styleSource, /\.results-nav\s*\{[^}]*overflow-y:\s*auto;[^}]*max-height:\s*calc\(100vh - 104px\);/s);
+
 function evaluate(expression) {
   return vm.runInContext(expression, context);
 }
@@ -236,9 +267,50 @@ evaluate(`handleParsedData({
   errors: [{type: "Delimiter", code: "UndetectableDelimiter", message: "bad delimiter"}],
   meta: {fields: ["字段"]},
   data: [{"字段": "1"}]
-}, "broken.csv", ${secondImport})`);
+}, "one-column.csv", ${secondImport})`);
+assert.equal(evaluate("state.rows.length"), 1);
+assert.equal(evaluate("state.fields.length"), 1);
+assert.equal(evaluate("state.parseWarnings.length"), 0);
+assert.notEqual(elements.get("statusPanel").className, "status-panel error");
+
+const malformedImport = evaluate("beginImport()");
+evaluate(`handleParsedData({
+  errors: [
+    {type: "Delimiter", code: "UndetectableDelimiter", message: "bad delimiter"},
+    {type: "Quotes", code: "MissingQuotes", message: "unterminated quote"}
+  ],
+  meta: {fields: ["字段"]},
+  data: [{"字段": "1"}]
+}, "broken.csv", ${malformedImport})`);
 assert.equal(evaluate("state.rows.length"), 0);
 assert.equal(elements.get("statusPanel").className, "status-panel error");
+
+const duplicateHeaderImport = evaluate("beginImport()");
+evaluate(`handleParsedData({
+  errors: [],
+  meta: {fields: ["字段", " 字段 "]},
+  data: [{"字段": "A", " 字段 ": "B"}]
+}, "duplicate-header.csv", ${duplicateHeaderImport})`);
+assert.equal(evaluate("state.rows.length"), 0);
+assert.match(elements.get("statusPanel").textContent, /重复字段/);
+
+const blankHeaderImport = evaluate("beginImport()");
+evaluate(`handleParsedData({
+  errors: [],
+  meta: {fields: ["", "字段"]},
+  data: [{"": "A", "字段": "B"}]
+}, "blank-header.csv", ${blankHeaderImport})`);
+assert.equal(evaluate("state.rows.length"), 0);
+assert.match(elements.get("statusPanel").textContent, /缺少表头/);
+
+const emptyTrailingColumnImport = evaluate("beginImport()");
+evaluate(`handleParsedData({
+  errors: [],
+  meta: {fields: ["字段", ""]},
+  data: [{"字段": "A", "": ""}]
+}, "empty-trailing-column.csv", ${emptyTrailingColumnImport})`);
+assert.equal(evaluate("state.rows.length"), 1);
+assert.equal(evaluate("state.fields.length"), 1);
 
 const warningImport = evaluate("beginImport()");
 evaluate(`handleParsedData({

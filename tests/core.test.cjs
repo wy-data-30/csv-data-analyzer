@@ -617,6 +617,7 @@ assert.match(reportHtml, /自动分析结论/);
 assert.match(reportHtml, /销售额 &lt;分布&gt;/);
 assert.match(reportHtml, /data:image\/png;base64,ZmFrZS1jaGFydA==/);
 assert.match(reportHtml, /Smart Tabular Analyzer/);
+assert.match(reportHtml, /https:\/\/github\.com\/wy-data-30\/smart-tabular-analyzer/);
 assert.doesNotMatch(reportHtml, legacyProductNamePattern);
 assert.doesNotMatch(reportHtml, /<(?:script|link)[^>]+(?:src|href)=["']https?:/i);
 
@@ -633,6 +634,7 @@ assert.match(reportMarkdown, /## 自定义分组分析结果/);
 assert.match(reportMarkdown, /## 自动分析结论/);
 assert.match(reportMarkdown, /\| 销售额 \|/);
 assert.match(reportMarkdown, /Smart Tabular Analyzer/);
+assert.match(reportMarkdown, /https:\/\/github\.com\/wy-data-30\/smart-tabular-analyzer/);
 assert.doesNotMatch(reportMarkdown, legacyProductNamePattern);
 
 assert.match(

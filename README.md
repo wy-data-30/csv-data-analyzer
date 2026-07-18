@@ -6,7 +6,9 @@
 
 **Subtitle:** Browser-based CSV and Excel data analysis tool
 
-**Live Demo:** [Open Smart Tabular Analyzer](https://wy-data-30.github.io/csv-data-analyzer/)
+**Repository:** [github.com/wy-data-30/smart-tabular-analyzer](https://github.com/wy-data-30/smart-tabular-analyzer)
+
+**Live Demo:** [Open Smart Tabular Analyzer](https://wy-data-30.github.io/smart-tabular-analyzer/)
 
 [中文说明](./README.zh-CN.md)
 

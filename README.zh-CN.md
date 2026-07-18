@@ -1,18 +1,22 @@
-# Smart CSV Analyzer
+# Smart Tabular Analyzer
 
 **当前版本：** V2.3
 
-**在线演示：** [打开 Smart CSV Analyzer](https://wy-data-30.github.io/csv-data-analyzer/)
+**中文名称：** 智能表格数据分析工具
+
+**副标题：** Browser-based CSV and Excel data analysis tool
+
+**在线演示：** [打开 Smart Tabular Analyzer](https://wy-data-30.github.io/csv-data-analyzer/)
 
 [English README](./README.md)
 
-Smart CSV Analyzer 是一个纯前端 CSV/Excel 数据分析工具，用于快速查看和分析结构化数据文件。用户上传文件后，应用会在浏览器端完成数据预览、字段类型识别、数据质量检查、描述性统计、图表生成、自定义分组分析和基础结论生成。
+Smart Tabular Analyzer（智能表格数据分析工具）是一个纯前端 CSV/Excel 数据分析工具，用于快速查看和分析结构化数据文件。用户上传文件后，应用会在浏览器端完成数据预览、字段类型识别、数据质量检查、描述性统计、图表生成、自定义分组分析和基础结论生成。
 
 该项目是静态网站，不依赖后端服务、数据库、账号系统或构建流程，适合部署到 GitHub Pages 等静态托管平台。
 
 ## 项目简介
 
-CSV 文件经常来自不同系统或业务场景，字段结构并不固定。Smart CSV Analyzer 通过自动识别字段类型和生成基础分析结果，帮助用户快速了解数据规模、字段结构、缺失情况、重复行、异常值、分类分布和时间趋势。
+CSV 文件经常来自不同系统或业务场景，字段结构并不固定。Smart Tabular Analyzer 通过自动识别字段类型和生成基础分析结果，帮助用户快速了解数据规模、字段结构、缺失情况、重复行、异常值、分类分布和时间趋势。
 
 项目不会假设固定字段名。对于不同结构的数据，用户可以通过字段选择器或场景模板手动映射分析字段。
 

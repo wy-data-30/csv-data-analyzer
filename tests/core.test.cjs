@@ -16,7 +16,9 @@ class FakeElement {
   }
 
   addEventListener() {}
+  focus() {}
   removeAttribute() {}
+  scrollIntoView() {}
   setAttribute() {}
   querySelectorAll() { return []; }
   getContext() {
@@ -38,7 +40,14 @@ const document = {
 const context = vm.createContext({
   console,
   document,
-  window: { Chart: null, print() {} },
+  window: {
+    Chart: null,
+    addEventListener() {},
+    innerHeight: 900,
+    print() {},
+    requestAnimationFrame(callback) { callback(); return 1; },
+    scrollY: 0
+  },
   TextDecoder,
   Uint8Array,
   Intl,
@@ -80,12 +89,17 @@ localAssetReferences.forEach((reference) => {
 });
 assert.match(source, /fetch\("sample-data\.csv"\)/);
 
-const mobile420Start = styleSource.indexOf("@media (max-width: 420px)");
-const mobile420End = styleSource.indexOf("@media (prefers-reduced-motion", mobile420Start);
-const mobile420Source = styleSource.slice(mobile420Start, mobile420End);
-assert.match(mobile420Source, /\.report-actions\s*\{[^}]*grid-template-columns:\s*1fr;/s);
-assert.match(mobile420Source, /\.frequency-row\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+auto;/s);
-assert.match(styleSource, /\.results-nav\s*\{[^}]*overflow-y:\s*auto;[^}]*max-height:\s*calc\(100vh - 104px\);/s);
+const mobile640Start = styleSource.indexOf("@media (max-width: 640px)");
+const mobile640End = styleSource.indexOf("@media (max-width: 390px)", mobile640Start);
+const mobile640Source = styleSource.slice(mobile640Start, mobile640End);
+assert.match(mobile640Source, /\.report-actions\s*\{[^}]*grid-template-columns:\s*1fr;/s);
+assert.match(styleSource, /\.frequency-row\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+auto;/s);
+assert.match(styleSource, /\.results-nav\s*\{[^}]*position:\s*sticky;/s);
+assert.match(mobile640Source, /\.results-nav\s*\{[^}]*position:\s*static;/s);
+assert.match(htmlSource, /<title>Smart Tabular Analyzer \| 智能表格数据分析工具<\/title>/);
+const legacyProductNamePattern = new RegExp(["Smart", "CSV", "Analyzer"].join(" "));
+assert.doesNotMatch(htmlSource, legacyProductNamePattern);
+assert.doesNotMatch(source, legacyProductNamePattern);
 
 function evaluate(expression) {
   return vm.runInContext(expression, context);
@@ -602,6 +616,8 @@ assert.match(reportHtml, /自定义分组分析结果/);
 assert.match(reportHtml, /自动分析结论/);
 assert.match(reportHtml, /销售额 &lt;分布&gt;/);
 assert.match(reportHtml, /data:image\/png;base64,ZmFrZS1jaGFydA==/);
+assert.match(reportHtml, /Smart Tabular Analyzer/);
+assert.doesNotMatch(reportHtml, legacyProductNamePattern);
 assert.doesNotMatch(reportHtml, /<(?:script|link)[^>]+(?:src|href)=["']https?:/i);
 
 const reportMarkdown = evaluate("buildMarkdownReport(__reportData)");
@@ -616,6 +632,8 @@ assert.match(reportMarkdown, /## 日期趋势摘要/);
 assert.match(reportMarkdown, /## 自定义分组分析结果/);
 assert.match(reportMarkdown, /## 自动分析结论/);
 assert.match(reportMarkdown, /\| 销售额 \|/);
+assert.match(reportMarkdown, /Smart Tabular Analyzer/);
+assert.doesNotMatch(reportMarkdown, legacyProductNamePattern);
 
 assert.match(
   evaluate('buildReportFileName("html", new Date(2026, 6, 17, 14, 30, 5))'),

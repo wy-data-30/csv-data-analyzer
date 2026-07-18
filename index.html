@@ -154,11 +154,12 @@
           <a class="active" href="#overviewSection"><span>01</span>数据概览</a>
           <a href="#qualitySection"><span>02</span>数据质量</a>
           <a href="#schemaSection"><span>03</span>字段配置</a>
-          <a href="#statisticsSection"><span>04</span>描述性统计</a>
-          <a href="#chartsSection"><span>05</span>图表分析</a>
-          <a href="#customSection"><span>06</span>自定义分析</a>
-          <a href="#insightsSection"><span>07</span>分析结论</a>
-          <a href="#reportSection"><span>08</span>报告导出</a>
+          <a href="#filterSection"><span>04</span>数据筛选</a>
+          <a href="#statisticsSection"><span>05</span>描述性统计</a>
+          <a href="#chartsSection"><span>06</span>图表分析</a>
+          <a href="#customSection"><span>07</span>自定义分析</a>
+          <a href="#insightsSection"><span>08</span>分析结论</a>
+          <a href="#reportSection"><span>09</span>报告导出</a>
         </nav>
       </aside>
 
@@ -185,6 +186,7 @@
             <h2>缺失、重复与异常检查</h2>
           </div>
         </div>
+        <p class="section-note">本模块始终基于导入的原始数据计算，不受当前筛选条件影响。</p>
         <div id="qualitySummary" class="quality-summary"></div>
         <div class="two-column">
           <div>
@@ -219,6 +221,98 @@
         </div>
         <div class="table-wrap" tabindex="0" aria-label="字段配置表，可横向滚动">
           <table id="schemaTable" aria-label="字段类型配置" aria-describedby="fieldConfigMessage"></table>
+        </div>
+      </section>
+
+      <section id="filterSection" class="section-block">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">数据筛选</p>
+            <h2>设置当前分析范围</h2>
+          </div>
+        </div>
+        <p class="section-note">分类、数值和日期条件可以同时应用。筛选只影响当前分析结果，不修改原始数据和数据质量报告。</p>
+
+        <div class="filter-count-grid" aria-label="筛选记录统计">
+          <div class="filter-count-item">
+            <span>原始记录数</span>
+            <strong id="filterOriginalCount">0</strong>
+          </div>
+          <div class="filter-count-item current">
+            <span>当前记录数</span>
+            <strong id="filterCurrentCount">0</strong>
+          </div>
+          <div class="filter-count-item">
+            <span>已筛除记录数</span>
+            <strong id="filterExcludedCount">0</strong>
+          </div>
+        </div>
+
+        <div class="filter-builder-grid">
+          <div class="filter-condition">
+            <div class="filter-condition-heading">
+              <h3>分类字段</h3>
+              <span id="categoryFilterSelectionCount">未选择字段</span>
+            </div>
+            <label class="filter-field-label" for="categoryFilterField">筛选字段
+              <select id="categoryFilterField"></select>
+            </label>
+            <div id="categoryFilterControls" class="category-filter-controls hidden">
+              <label class="filter-search-label" for="categoryFilterSearch">搜索类别
+                <input id="categoryFilterSearch" type="search" placeholder="输入关键词" autocomplete="off">
+              </label>
+              <div class="filter-selection-actions">
+                <button id="selectAllCategoryValues" class="text-button" type="button">全选</button>
+                <button id="clearCategoryValues" class="text-button" type="button">取消全选</button>
+              </div>
+              <div id="categoryFilterValues" class="filter-value-list" role="group" aria-label="类别值"></div>
+            </div>
+            <p id="categoryFilterEmpty" class="filter-empty-note">请选择分类字段。</p>
+          </div>
+
+          <div class="filter-condition">
+            <div class="filter-condition-heading">
+              <h3>数值字段</h3>
+              <span id="numericFilterRange">请选择字段</span>
+            </div>
+            <label class="filter-field-label" for="numericFilterField">筛选字段
+              <select id="numericFilterField"></select>
+            </label>
+            <div class="filter-range-grid">
+              <label for="numericFilterMin">最小值
+                <input id="numericFilterMin" type="number" step="any" disabled>
+              </label>
+              <label for="numericFilterMax">最大值
+                <input id="numericFilterMax" type="number" step="any" disabled>
+              </label>
+            </div>
+          </div>
+
+          <div class="filter-condition">
+            <div class="filter-condition-heading">
+              <h3>日期字段</h3>
+              <span id="dateFilterRange">请选择字段</span>
+            </div>
+            <label class="filter-field-label" for="dateFilterField">筛选字段
+              <select id="dateFilterField"></select>
+            </label>
+            <div class="filter-range-grid">
+              <label for="dateFilterStart">开始日期
+                <input id="dateFilterStart" type="date" disabled>
+              </label>
+              <label for="dateFilterEnd">结束日期
+                <input id="dateFilterEnd" type="date" disabled>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="filter-toolbar">
+          <p id="filterMessage" class="filter-message" aria-live="polite">尚未应用筛选，当前分析使用全部记录。</p>
+          <div class="filter-toolbar-actions">
+            <button id="clearAllFilters" class="secondary-button" type="button">清除全部筛选</button>
+            <button id="applyFilters" type="button">应用筛选</button>
+          </div>
         </div>
       </section>
 

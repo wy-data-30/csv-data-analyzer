@@ -173,3 +173,72 @@ test("empty, single-column and type-missing datasets remain safe", () => {
   assert.equal(evaluate("state.numericStats.length"), 1);
   assert.equal(evaluate("state.categoryStats.length"), 0);
 });
+
+test("category, numeric and date filters combine without mutating original rows", () => {
+  const { context, evaluate } = createScriptContext();
+  const rows = [
+    { 地区: "华东", 销售额: "100", 日期: "2026-01-05" },
+    { 地区: "华东", 销售额: "220", 日期: "2026-01-10" },
+    { 地区: "华南", 销售额: "150", 日期: "2026-01-12" },
+    { 地区: "华东", 销售额: "180", 日期: "2026-02-02" },
+    { 地区: "华东", 销售额: "", 日期: "2026-01-20" }
+  ];
+  put(context, "__rows", rows);
+  const originalSnapshot = JSON.stringify(rows);
+  const filtered = JSON.parse(evaluate(`JSON.stringify((() => {
+    state.rows = __rows;
+    state.fields = ["地区", "销售额", "日期"];
+    state.profiles = state.fields.map((field) => buildColumnProfile(field, state.rows));
+    return filterRowsByConfig(state.rows, {
+      category: {field: "地区", values: ["华东"]},
+      numeric: {field: "销售额", min: 90, max: 200},
+      date: {field: "日期", start: "2026-01-01", end: "2026-01-31"}
+    });
+  })())`));
+
+  assert.deepEqual(filtered, [rows[0]]);
+  assert.equal(JSON.stringify(rows), originalSnapshot);
+  assert.equal(evaluate("state.rows.length"), 5);
+});
+
+test("filtered statistics change while original quality outliers remain stable", () => {
+  const { context, elements, evaluate } = createScriptContext();
+  const rows = [
+    { 数值: "1" },
+    { 数值: "2" },
+    { 数值: "3" },
+    { 数值: "4" },
+    { 数值: "100" }
+  ];
+  put(context, "__rows", rows);
+  evaluate(`(() => {
+    state.rows = __rows;
+    state.fields = ["数值"];
+    state.profiles = [buildColumnProfile("数值", state.rows)];
+    state.filteredRows = state.rows.slice(0, 4);
+    state.filterSourceRows = state.rows;
+    state.numericStats = buildNumericStats(getAnalysisRows());
+    state.qualityNumericStats = buildNumericStats(state.rows);
+    state.categoryStats = buildCategoryStats(getAnalysisRows());
+    state.totalMissing = 0;
+    state.duplicateRows = 0;
+    state.analysisCompletedAt = new Date("2026-07-18T00:00:00.000Z");
+  })()`);
+
+  assert.equal(evaluate("state.rows.length"), 5);
+  assert.equal(evaluate("getAnalysisRows().length"), 4);
+  assert.equal(evaluate("state.numericStats[0].outlierCount"), 0);
+  assert.equal(evaluate("getQualityNumericStats()[0].outlierCount"), 1);
+
+  const report = JSON.parse(evaluate(
+    'JSON.stringify(buildReportData(new Date("2026-07-18T01:00:00.000Z")))'
+  ));
+  assert.equal(report.dataScale.rows, 4);
+  assert.equal(report.dataScale.originalRows, 5);
+  assert.equal(report.dataScale.filteredOutRows, 1);
+  assert.equal(report.quality.outliers[0].outlierCount, 1);
+
+  evaluate('rebuildAnalysisFromProfiles("测试字段配置")');
+  assert.equal(evaluate("getAnalysisRows().length"), 5);
+  assert.match(elements.get("previewTable").innerHTML, />100</);
+});

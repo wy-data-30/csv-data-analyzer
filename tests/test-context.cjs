@@ -4,6 +4,7 @@ const vm = require("node:vm");
 
 class FakeElement {
   constructor() {
+    const classes = new Set();
     this.value = "";
     this.innerHTML = "";
     this.textContent = "";
@@ -12,7 +13,18 @@ class FakeElement {
     this.options = [];
     this.selectedIndex = 0;
     this.disabled = false;
-    this.classList = { add() {}, remove() {}, toggle() {} };
+    this.classList = {
+      add(...names) { names.forEach((name) => classes.add(name)); },
+      remove(...names) { names.forEach((name) => classes.delete(name)); },
+      toggle(name, force) {
+        if (force === true) classes.add(name);
+        else if (force === false) classes.delete(name);
+        else if (classes.has(name)) classes.delete(name);
+        else classes.add(name);
+        return classes.has(name);
+      },
+      contains(name) { return classes.has(name); }
+    };
   }
 
   addEventListener() {}

@@ -8,6 +8,12 @@ const { context, elements, source, evaluate } = createScriptContext();
 const projectRoot = path.join(__dirname, "..");
 const htmlSource = fs.readFileSync(path.join(projectRoot, "index.html"), "utf8");
 const styleSource = fs.readFileSync(path.join(projectRoot, "style.css"), "utf8");
+const missingDomIds = [...new Set(
+  [...source.matchAll(/document\.getElementById\("([^"]+)"\)/g)]
+    .map((match) => match[1])
+    .filter((id) => !new RegExp(`id=["']${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`).test(htmlSource))
+)];
+assert.deepEqual(missingDomIds, []);
 assert.match(
   htmlSource,
   /https:\/\/cdn\.sheetjs\.com\/xlsx-0\.20\.3\/package\/dist\/xlsx\.full\.min\.js/

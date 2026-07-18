@@ -1,8 +1,11 @@
 const state = {
   rows: [],
+  filteredRows: null,
+  filterSourceRows: null,
   fields: [],
   profiles: [],
   numericStats: [],
+  qualityNumericStats: [],
   categoryStats: [],
   duplicateRows: 0,
   totalMissing: 0,
@@ -17,7 +20,14 @@ const state = {
   sourceType: "",
   analysisCompletedAt: null,
   insights: [],
-  customAnalysis: null
+  customAnalysis: null,
+  filters: {
+    category: null,
+    numeric: null,
+    date: null
+  },
+  categoryFilterOptions: [],
+  categoryFilterDraftValues: new Set()
 };
 
 const dom = {
@@ -41,6 +51,28 @@ const dom = {
   fieldConfigMessage: document.getElementById("fieldConfigMessage"),
   applyFieldConfig: document.getElementById("applyFieldConfig"),
   restoreAutoFieldTypes: document.getElementById("restoreAutoFieldTypes"),
+  categoryFilterField: document.getElementById("categoryFilterField"),
+  categoryFilterControls: document.getElementById("categoryFilterControls"),
+  categoryFilterSearch: document.getElementById("categoryFilterSearch"),
+  categoryFilterValues: document.getElementById("categoryFilterValues"),
+  categoryFilterEmpty: document.getElementById("categoryFilterEmpty"),
+  categoryFilterSelectionCount: document.getElementById("categoryFilterSelectionCount"),
+  selectAllCategoryValues: document.getElementById("selectAllCategoryValues"),
+  clearCategoryValues: document.getElementById("clearCategoryValues"),
+  numericFilterField: document.getElementById("numericFilterField"),
+  numericFilterMin: document.getElementById("numericFilterMin"),
+  numericFilterMax: document.getElementById("numericFilterMax"),
+  numericFilterRange: document.getElementById("numericFilterRange"),
+  dateFilterField: document.getElementById("dateFilterField"),
+  dateFilterStart: document.getElementById("dateFilterStart"),
+  dateFilterEnd: document.getElementById("dateFilterEnd"),
+  dateFilterRange: document.getElementById("dateFilterRange"),
+  filterOriginalCount: document.getElementById("filterOriginalCount"),
+  filterCurrentCount: document.getElementById("filterCurrentCount"),
+  filterExcludedCount: document.getElementById("filterExcludedCount"),
+  filterMessage: document.getElementById("filterMessage"),
+  applyFilters: document.getElementById("applyFilters"),
+  clearAllFilters: document.getElementById("clearAllFilters"),
   qualitySummary: document.getElementById("qualitySummary"),
   qualityTable: document.getElementById("qualityTable"),
   outlierTable: document.getElementById("outlierTable"),
@@ -258,6 +290,15 @@ dom.schemaTable.addEventListener("change", (event) => {
 });
 dom.applyFieldConfig.addEventListener("click", applyFieldConfiguration);
 dom.restoreAutoFieldTypes.addEventListener("click", restoreAutomaticFieldTypes);
+dom.categoryFilterField.addEventListener("change", updateCategoryFilterField);
+dom.categoryFilterSearch.addEventListener("input", renderCategoryFilterValues);
+dom.categoryFilterValues.addEventListener("change", updateCategoryFilterDraftSelection);
+dom.selectAllCategoryValues.addEventListener("click", () => setAllCategoryFilterValues(true));
+dom.clearCategoryValues.addEventListener("click", () => setAllCategoryFilterValues(false));
+dom.numericFilterField.addEventListener("change", updateNumericFilterField);
+dom.dateFilterField.addEventListener("change", updateDateFilterField);
+dom.applyFilters.addEventListener("click", applyFilters);
+dom.clearAllFilters.addEventListener("click", clearAllFilters);
 updateExportButtons();
 
 [dom.v2MetricField, dom.v2GroupField, dom.v2DateField].forEach((control) => {
@@ -787,6 +828,8 @@ function commitTabularData(fields, rows, sourceName, importId, parseWarnings = [
   }
 
   state.rows = rows;
+  state.filteredRows = rows.slice();
+  state.filterSourceRows = state.rows;
   state.fields = fields;
   state.parseWarnings = parseWarnings;
   state.pendingExcel = null;
@@ -796,6 +839,9 @@ function commitTabularData(fields, rows, sourceName, importId, parseWarnings = [
   state.analysisCompletedAt = new Date();
   state.insights = [];
   state.customAnalysis = null;
+  state.filters = createEmptyFilterConfig();
+  state.categoryFilterOptions = [];
+  state.categoryFilterDraftValues = new Set();
   state.profiles = fields.map((field) => buildColumnProfile(field, rows));
   state.typeOverrides = Object.create(null);
   state.fieldTypeDrafts = Object.fromEntries(
@@ -803,8 +849,9 @@ function commitTabularData(fields, rows, sourceName, importId, parseWarnings = [
   );
   state.duplicateRows = countDuplicateRows(rows, fields);
   state.totalMissing = state.profiles.reduce((sum, profile) => sum + profile.missingCount, 0);
-  state.numericStats = buildNumericStats();
-  state.categoryStats = buildCategoryStats();
+  state.numericStats = buildNumericStats(state.filteredRows);
+  state.qualityNumericStats = buildNumericStats(state.rows);
+  state.categoryStats = buildCategoryStats(state.filteredRows);
 
   const sourceDisplayName = sheetName ? `${sourceName} · ${sheetName}` : sourceName;
   dom.sourceName.textContent = `已载入 · ${sourceDisplayName}`;
@@ -822,6 +869,7 @@ function commitTabularData(fields, rows, sourceName, importId, parseWarnings = [
   renderInsights();
   renderPreview();
   renderSchema();
+  initializeFilterControls();
   renderQuality();
   renderNumericStats();
   renderCategoryStats();
@@ -917,9 +965,9 @@ function countFieldConversionFailures(field, typeKey) {
   );
 }
 
-function buildNumericStats() {
+function buildNumericStats(rows = getAnalysisRows()) {
   return getProfilesByType("numeric").flatMap((profile) => {
-    const values = getNumericValues(profile.field);
+    const values = getNumericValues(profile.field, rows);
     if (!values.length) return [];
     const sorted = [...values].sort((a, b) => a - b);
     const avg = mean(values);
@@ -949,34 +997,37 @@ function buildNumericStats() {
   });
 }
 
-function buildCategoryStats() {
+function buildCategoryStats(rows = getAnalysisRows()) {
   return getProfilesByType("category").map((profile) => {
-    const counts = countValues(profile.field);
+    const counts = countValues(profile.field, rows);
+    const nonMissingCount = rows.filter((row) => !isMissing(row[profile.field])).length;
     const top = Array.from(counts.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
       .map(([name, count]) => ({
         name,
         count,
-        ratio: profile.nonMissingCount ? count / profile.nonMissingCount : 0
+        ratio: nonMissingCount ? count / nonMissingCount : 0
       }));
 
     return {
       field: profile.field,
-      total: profile.nonMissingCount,
+      total: nonMissingCount,
       top
     };
   });
 }
 
 function renderOverview() {
+  const analysisRows = getAnalysisRows();
   const activeProfiles = getActiveProfiles();
   const numericCount = getProfilesByType("numeric").length;
   const categoryCount = getProfilesByType("category").length;
   const dateCount = getProfilesByType("date").length;
   const ignoredCount = getProfilesByType("ignore").length;
   const cards = [
-    ["总行数", state.rows.length],
+    ["原始行数", state.rows.length],
+    ["当前分析行数", analysisRows.length],
     ["总字段数", state.fields.length],
     ["参与分析字段数", activeProfiles.length],
     ["数值字段数量", numericCount],
@@ -996,19 +1047,37 @@ function renderOverview() {
 }
 
 function renderInsights() {
+  const analysisRows = getAnalysisRows();
   const insights = [];
   const activeProfiles = getActiveProfiles();
   const activeFields = activeProfiles.map((profile) => profile.field);
   const ignoredCount = state.profiles.length - activeProfiles.length;
-  const activeMissing = activeProfiles.reduce((sum, profile) => sum + profile.missingCount, 0);
-  const analysisDuplicates = activeFields.length ? countDuplicateRows(state.rows, activeFields) : 0;
-  const missingRate = state.rows.length && activeFields.length
-    ? activeMissing / (state.rows.length * activeFields.length)
+  const activeMissing = analysisRows.reduce((sum, row) => (
+    sum + activeFields.filter((field) => isMissing(row[field])).length
+  ), 0);
+  const analysisDuplicates = activeFields.length ? countDuplicateRows(analysisRows, activeFields) : 0;
+  const missingRate = analysisRows.length && activeFields.length
+    ? activeMissing / (analysisRows.length * activeFields.length)
     : 0;
+  const filteredOutCount = Math.max(0, state.rows.length - analysisRows.length);
+  const scopeText = hasActiveFilters()
+    ? `原始数据包含 ${formatInteger(state.rows.length)} 行；应用筛选后保留 ${formatInteger(analysisRows.length)} 行，筛除 ${formatInteger(filteredOutCount)} 行。`
+    : `数据集包含 ${formatInteger(state.rows.length)} 行，当前分析使用全部记录。`;
 
   if (!activeFields.length) {
-    insights.push(`数据集包含 ${formatInteger(state.rows.length)} 行、${formatInteger(state.fields.length)} 个原始字段。`);
+    insights.push(scopeText);
+    insights.push(`数据集包含 ${formatInteger(state.fields.length)} 个原始字段。`);
     insights.push("所有字段均已设为忽略，因此未生成统计、图表或字段相关的自动结论。");
+    state.insights = insights;
+    dom.insights.innerHTML = insights.map((text) => `
+      <div class="insight-item">${escapeHtml(text)}</div>
+    `).join("");
+    return;
+  }
+
+  if (!analysisRows.length) {
+    insights.push(scopeText);
+    insights.push("当前筛选条件下没有记录，因此未生成描述性统计、分类分布或趋势结论。请调整或清除筛选条件。");
     state.insights = insights;
     dom.insights.innerHTML = insights.map((text) => `
       <div class="insight-item">${escapeHtml(text)}</div>
@@ -1023,7 +1092,8 @@ function renderInsights() {
   const dateProfile = getProfilesByType("date")
     .find((profile) => fieldHasDateData(profile.field));
 
-  insights.push(`数据集包含 ${formatInteger(state.rows.length)} 行，当前有 ${formatInteger(activeFields.length)} 个字段参与分析${ignoredCount ? `，另有 ${formatInteger(ignoredCount)} 个字段已忽略` : ""}；其中数值字段 ${getProfilesByType("numeric").length} 个，分类字段 ${getProfilesByType("category").length} 个，日期字段 ${getProfilesByType("date").length} 个。`);
+  insights.push(scopeText);
+  insights.push(`当前有 ${formatInteger(activeFields.length)} 个字段参与分析${ignoredCount ? `，另有 ${formatInteger(ignoredCount)} 个字段已忽略` : ""}；其中数值字段 ${getProfilesByType("numeric").length} 个，分类字段 ${getProfilesByType("category").length} 个，日期字段 ${getProfilesByType("date").length} 个。`);
   insights.push(`参与分析的字段共发现 ${formatInteger(activeMissing)} 个缺失值，缺失率为 ${formatPercent(missingRate)}；按参与分析字段计算的重复行数量为 ${formatInteger(analysisDuplicates)}。`);
 
   if (topNumeric) {
@@ -1052,7 +1122,11 @@ function renderInsights() {
 }
 
 function renderPreview() {
-  const previewRows = state.rows.slice(0, 10);
+  const previewRows = getAnalysisRows().slice(0, 10);
+  if (!previewRows.length) {
+    dom.previewTable.innerHTML = emptyTable("当前筛选条件下没有可预览的数据。");
+    return;
+  }
   dom.previewTable.innerHTML = `
     <thead>
       <tr>${state.fields.map((field) => `<th>${escapeHtml(field)}</th>`).join("")}</tr>
@@ -1228,14 +1302,324 @@ function ensureFieldConfigurationApplied(actionLabel) {
   return false;
 }
 
+function createEmptyFilterConfig() {
+  return {
+    category: null,
+    numeric: null,
+    date: null
+  };
+}
+
+function getAnalysisRows() {
+  return state.filterSourceRows === state.rows && Array.isArray(state.filteredRows)
+    ? state.filteredRows
+    : state.rows;
+}
+
+function getQualityNumericStats() {
+  return state.filterSourceRows === state.rows
+    ? state.qualityNumericStats
+    : buildNumericStats(state.rows);
+}
+
+function hasActiveFilters(filters = state.filters) {
+  return Boolean(filters?.category || filters?.numeric || filters?.date);
+}
+
+function resetFilterState() {
+  state.filteredRows = state.rows.slice();
+  state.filterSourceRows = state.rows;
+  state.filters = createEmptyFilterConfig();
+  state.categoryFilterOptions = [];
+  state.categoryFilterDraftValues = new Set();
+}
+
+function initializeFilterControls() {
+  const categoryFields = getProfilesByType("category").map((profile) => profile.field);
+  const numericFields = getProfilesByType("numeric")
+    .filter((profile) => fieldHasNumericData(profile.field, state.rows))
+    .map((profile) => profile.field);
+  const dateFields = getProfilesByType("date")
+    .filter((profile) => fieldHasDateData(profile.field, state.rows))
+    .map((profile) => profile.field);
+
+  setSelectOptions(dom.categoryFilterField, categoryFields, "不筛选分类字段", true);
+  setSelectOptions(dom.numericFilterField, numericFields, "不筛选数值字段", true);
+  setSelectOptions(dom.dateFilterField, dateFields, "不筛选日期字段", true);
+  dom.categoryFilterField.disabled = categoryFields.length === 0;
+  dom.numericFilterField.disabled = numericFields.length === 0;
+  dom.dateFilterField.disabled = dateFields.length === 0;
+  dom.categoryFilterField.value = "";
+  dom.numericFilterField.value = "";
+  dom.dateFilterField.value = "";
+  updateCategoryFilterField();
+  updateNumericFilterField();
+  updateDateFilterField();
+  renderFilterCounts();
+  setFilterMessage("尚未应用筛选，当前分析使用全部记录。", "");
+}
+
+function getCategoryFilterOptions(field) {
+  if (!field) return [];
+  const counts = new Map();
+  state.rows.forEach((row) => {
+    const value = normalizeValue(row[field]);
+    counts.set(value, (counts.get(value) || 0) + 1);
+  });
+  return Array.from(counts.entries())
+    .map(([value, count]) => ({
+      value,
+      count,
+      label: value || "（空值）"
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label, "zh-CN", { numeric: true }));
+}
+
+function updateCategoryFilterField() {
+  const field = dom.categoryFilterField.value;
+  dom.categoryFilterSearch.value = "";
+  state.categoryFilterOptions = getCategoryFilterOptions(field);
+  state.categoryFilterDraftValues = new Set(
+    state.categoryFilterOptions.map((option) => option.value)
+  );
+  dom.categoryFilterControls.classList.toggle("hidden", !field);
+  dom.categoryFilterEmpty.classList.toggle("hidden", Boolean(field));
+  dom.categoryFilterEmpty.textContent = dom.categoryFilterField.disabled
+    ? "没有可用的分类字段。"
+    : "请选择分类字段。";
+  renderCategoryFilterValues();
+}
+
+function renderCategoryFilterValues() {
+  const query = dom.categoryFilterSearch.value.trim().toLocaleLowerCase("zh-CN");
+  const visibleOptions = state.categoryFilterOptions.filter((option) => (
+    !query || option.label.toLocaleLowerCase("zh-CN").includes(query)
+  ));
+  const selectedCount = state.categoryFilterDraftValues.size;
+  dom.categoryFilterSelectionCount.textContent = dom.categoryFilterField.value
+    ? `已选 ${formatInteger(selectedCount)} / ${formatInteger(state.categoryFilterOptions.length)}`
+    : "未选择字段";
+
+  if (!visibleOptions.length) {
+    dom.categoryFilterValues.innerHTML = `<p class="filter-value-empty">没有匹配的类别。</p>`;
+    return;
+  }
+
+  dom.categoryFilterValues.innerHTML = visibleOptions.map((option) => {
+    const index = state.categoryFilterOptions.indexOf(option);
+    return `
+      <label class="filter-value-option">
+        <input type="checkbox" data-category-filter-index="${index}"${state.categoryFilterDraftValues.has(option.value) ? " checked" : ""}>
+        <span class="value-label" title="${escapeHtml(option.label)}">${escapeHtml(option.label)}</span>
+        <span class="value-count">${formatInteger(option.count)}</span>
+      </label>
+    `;
+  }).join("");
+}
+
+function updateCategoryFilterDraftSelection(event) {
+  const checkbox = event.target.closest("input[data-category-filter-index]");
+  if (!checkbox) return;
+  const option = state.categoryFilterOptions[Number(checkbox.dataset.categoryFilterIndex)];
+  if (!option) return;
+  if (checkbox.checked) state.categoryFilterDraftValues.add(option.value);
+  else state.categoryFilterDraftValues.delete(option.value);
+  dom.categoryFilterSelectionCount.textContent = `已选 ${formatInteger(state.categoryFilterDraftValues.size)} / ${formatInteger(state.categoryFilterOptions.length)}`;
+}
+
+function setAllCategoryFilterValues(selected) {
+  state.categoryFilterDraftValues = selected
+    ? new Set(state.categoryFilterOptions.map((option) => option.value))
+    : new Set();
+  renderCategoryFilterValues();
+}
+
+function updateNumericFilterField() {
+  const field = dom.numericFilterField.value;
+  const values = field ? getNumericValues(field, state.rows) : [];
+  const enabled = values.length > 0;
+  dom.numericFilterMin.disabled = !enabled;
+  dom.numericFilterMax.disabled = !enabled;
+  if (!enabled) {
+    dom.numericFilterMin.value = "";
+    dom.numericFilterMax.value = "";
+    dom.numericFilterRange.textContent = dom.numericFilterField.disabled ? "没有可用字段" : "请选择字段";
+    return;
+  }
+  const { min, max } = numericExtents(values);
+  dom.numericFilterMin.value = String(min);
+  dom.numericFilterMax.value = String(max);
+  dom.numericFilterRange.textContent = `${formatFieldNumber(field, min)} 至 ${formatFieldNumber(field, max)}`;
+}
+
+function updateDateFilterField() {
+  const field = dom.dateFilterField.value;
+  const dates = field
+    ? state.rows.map((row) => parseFieldDate(field, row[field])).filter(Boolean).sort((a, b) => a - b)
+    : [];
+  const enabled = dates.length > 0;
+  dom.dateFilterStart.disabled = !enabled;
+  dom.dateFilterEnd.disabled = !enabled;
+  if (!enabled) {
+    dom.dateFilterStart.value = "";
+    dom.dateFilterEnd.value = "";
+    dom.dateFilterRange.textContent = dom.dateFilterField.disabled ? "没有可用字段" : "请选择字段";
+    return;
+  }
+  const start = dates[0].toISOString().slice(0, 10);
+  const end = dates[dates.length - 1].toISOString().slice(0, 10);
+  dom.dateFilterStart.value = start;
+  dom.dateFilterEnd.value = end;
+  dom.dateFilterRange.textContent = `${start} 至 ${end}`;
+}
+
+function readFilterConfig() {
+  const filters = createEmptyFilterConfig();
+  const categoryField = dom.categoryFilterField.value;
+  if (categoryField) {
+    filters.category = {
+      field: categoryField,
+      values: Array.from(state.categoryFilterDraftValues)
+    };
+  }
+
+  const numericField = dom.numericFilterField.value;
+  if (numericField) {
+    if (dom.numericFilterMin.value === "" || dom.numericFilterMax.value === "") {
+      return { error: "请填写数值筛选的最小值和最大值。", filters };
+    }
+    const min = Number(dom.numericFilterMin.value);
+    const max = Number(dom.numericFilterMax.value);
+    if (!Number.isFinite(min) || !Number.isFinite(max)) {
+      return { error: "数值筛选范围必须是有效数字。", filters };
+    }
+    if (min > max) {
+      return { error: "数值筛选的最小值不能大于最大值。", filters };
+    }
+    filters.numeric = { field: numericField, min, max };
+  }
+
+  const dateField = dom.dateFilterField.value;
+  if (dateField) {
+    const start = dom.dateFilterStart.value;
+    const end = dom.dateFilterEnd.value;
+    if (!start || !end) {
+      return { error: "请填写日期筛选的开始日期和结束日期。", filters };
+    }
+    if (start > end) {
+      return { error: "日期筛选的开始日期不能晚于结束日期。", filters };
+    }
+    filters.date = { field: dateField, start, end };
+  }
+
+  return { error: "", filters };
+}
+
+function filterRowsByConfig(rows, filters) {
+  const categoryValues = filters.category ? new Set(filters.category.values) : null;
+  const startTime = filters.date ? Date.parse(`${filters.date.start}T00:00:00Z`) : null;
+  const endTime = filters.date ? Date.parse(`${filters.date.end}T23:59:59.999Z`) : null;
+
+  return rows.filter((row) => {
+    if (filters.category) {
+      const value = normalizeValue(row[filters.category.field]);
+      if (!categoryValues.has(value)) return false;
+    }
+    if (filters.numeric) {
+      const value = toNumber(row[filters.numeric.field]);
+      if (value === null || value < filters.numeric.min || value > filters.numeric.max) return false;
+    }
+    if (filters.date) {
+      const value = parseFieldDate(filters.date.field, row[filters.date.field]);
+      if (!value || value.getTime() < startTime || value.getTime() > endTime) return false;
+    }
+    return true;
+  });
+}
+
+function applyFilters() {
+  if (!state.rows.length) return;
+  if (!ensureFieldConfigurationApplied("应用筛选")) {
+    setFilterMessage("字段配置有未应用的修改，请先应用字段配置。", "warning");
+    return;
+  }
+  const { error, filters } = readFilterConfig();
+  if (error) {
+    setFilterMessage(error, "warning");
+    return;
+  }
+
+  state.filters = filters;
+  state.filteredRows = filterRowsByConfig(state.rows, filters);
+  state.filterSourceRows = state.rows;
+  refreshFilteredAnalysis();
+
+  const activeCount = [filters.category, filters.numeric, filters.date].filter(Boolean).length;
+  const filteredOutCount = state.rows.length - state.filteredRows.length;
+  if (!activeCount) {
+    setFilterMessage("未选择筛选字段，当前分析继续使用全部记录。", "");
+  } else if (!state.filteredRows.length) {
+    setFilterMessage(`已应用 ${formatInteger(activeCount)} 个筛选条件，但没有记录符合条件。`, "warning");
+  } else {
+    setFilterMessage(`已应用 ${formatInteger(activeCount)} 个筛选条件，保留 ${formatInteger(state.filteredRows.length)} 行，筛除 ${formatInteger(filteredOutCount)} 行。`, "success");
+  }
+}
+
+function clearAllFilters() {
+  if (!state.rows.length) return;
+  resetFilterState();
+  initializeFilterControls();
+  refreshFilteredAnalysis();
+  setFilterMessage("已清除全部筛选，当前分析恢复使用全部记录。", "success");
+}
+
+function renderFilterCounts() {
+  const currentCount = getAnalysisRows().length;
+  dom.filterOriginalCount.textContent = formatInteger(state.rows.length);
+  dom.filterCurrentCount.textContent = formatInteger(currentCount);
+  dom.filterExcludedCount.textContent = formatInteger(Math.max(0, state.rows.length - currentCount));
+}
+
+function setFilterMessage(message, tone = "") {
+  dom.filterMessage.className = `filter-message${tone ? ` ${tone}` : ""}`;
+  dom.filterMessage.textContent = message;
+}
+
+function refreshFilteredAnalysis() {
+  const rerunV2Analysis = Boolean(
+    state.customAnalysis && !dom.v2AnalysisResults.classList.contains("hidden")
+  );
+  const rerunTemplateAnalysis = !dom.templateResults.classList.contains("hidden");
+  state.analysisCompletedAt = null;
+  updateExportButtons();
+  state.numericStats = buildNumericStats(getAnalysisRows());
+  state.categoryStats = buildCategoryStats(getAnalysisRows());
+  renderOverview();
+  renderFilterCounts();
+  renderInsights();
+  renderPreview();
+  renderNumericStats();
+  renderCategoryStats();
+  renderCharts();
+  if (rerunV2Analysis) renderV2Analysis();
+  else resetV2AnalysisState();
+  if (rerunTemplateAnalysis) runTemplateAnalysis();
+  state.analysisCompletedAt = new Date();
+  updateExportButtons();
+}
+
 function rebuildAnalysisFromProfiles(fieldConfigMessage = "字段配置已更新。") {
   state.analysisCompletedAt = null;
   updateExportButtons();
-  state.numericStats = buildNumericStats();
-  state.categoryStats = buildCategoryStats();
+  resetFilterState();
+  state.numericStats = buildNumericStats(getAnalysisRows());
+  state.qualityNumericStats = buildNumericStats(state.rows);
+  state.categoryStats = buildCategoryStats(getAnalysisRows());
   renderOverview();
   renderInsights();
+  renderPreview();
   renderSchema();
+  initializeFilterControls();
   renderQuality();
   renderNumericStats();
   renderCategoryStats();
@@ -1244,18 +1628,19 @@ function rebuildAnalysisFromProfiles(fieldConfigMessage = "字段配置已更新
   resetV2AnalysisState();
   renderTemplateMappingForm();
   resetTemplateResults("字段类型已更新。请重新选择分析字段或模板映射。");
-  setFieldConfigMessage(fieldConfigMessage, "success");
+  setFieldConfigMessage(`${fieldConfigMessage} 已清除现有筛选条件。`, "success");
   state.analysisCompletedAt = new Date();
   updateFieldConfigActions();
 }
 
 function renderQuality() {
+  const qualityNumericStats = getQualityNumericStats();
   const missingClass = state.totalMissing === 0 ? "success" : missingRateLevel();
   const duplicateClass = state.duplicateRows === 0 ? "success" : "warning";
   dom.qualitySummary.innerHTML = `
     <span class="quality-pill ${missingClass}">缺失值总数：${formatInteger(state.totalMissing)}</span>
     <span class="quality-pill ${duplicateClass}">重复行：${formatInteger(state.duplicateRows)}</span>
-    <span class="quality-pill">异常值字段：${formatInteger(state.numericStats.filter((item) => item.outlierCount > 0).length)}</span>
+    <span class="quality-pill">异常值字段：${formatInteger(qualityNumericStats.filter((item) => item.outlierCount > 0).length)}</span>
   `;
 
   dom.qualityTable.innerHTML = `
@@ -1279,7 +1664,7 @@ function renderQuality() {
     </tbody>
   `;
 
-  if (!state.numericStats.length) {
+  if (!qualityNumericStats.length) {
     dom.outlierTable.innerHTML = emptyTable("未识别到数值字段。");
     return;
   }
@@ -1294,7 +1679,7 @@ function renderQuality() {
       </tr>
     </thead>
     <tbody>
-      ${state.numericStats.map((stat) => `
+      ${qualityNumericStats.map((stat) => `
         <tr>
           <td>${escapeHtml(stat.field)}</td>
           <td>${formatInteger(stat.outlierCount)}</td>
@@ -1349,13 +1734,13 @@ function renderCategoryStats() {
   dom.categoryStats.innerHTML = state.categoryStats.map((category) => `
     <div class="frequency-card">
       <h3>${escapeHtml(category.field)}</h3>
-      ${category.top.map((item) => `
+      ${category.top.length ? category.top.map((item) => `
         <div class="frequency-row">
           <span class="category-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
           <strong>${formatInteger(item.count)}</strong>
           <span>${formatPercent(item.ratio)}</span>
         </div>
-      `).join("")}
+      `).join("") : `<div class="empty-note">当前筛选结果中没有非空类别值。</div>`}
     </div>
   `).join("");
 }
@@ -1422,6 +1807,7 @@ function renderCategoryTopChart() {
   const counts = Array.from(countValues(field).entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 10);
+  if (!counts.length) return drawEmptyChart(canvas, "当前筛选结果中没有可统计的分类值");
   state.charts.categoryTopChart = new Chart(canvas, {
     type: "bar",
     data: {
@@ -1475,6 +1861,7 @@ function renderCustomAnalysisChart() {
   }
 
   const grouped = aggregateByCategory(metric, group, method).slice(0, 12);
+  if (!grouped.length) return drawEmptyChart(canvas, "当前筛选结果中没有可计算的分组记录");
   const methodLabel = { sum: "合计", avg: "平均值", median: "中位数" }[method];
   state.charts.customAnalysisChart = new Chart(canvas, {
     type: "bar",
@@ -1553,6 +1940,7 @@ function renderV2Analysis() {
 
 function getV2ValidationMessage(metricField, groupField, dateField) {
   if (!state.rows.length) return "请先上传或加载 CSV 数据。";
+  if (!getAnalysisRows().length) return "当前筛选条件下没有可分析的记录，请调整或清除筛选条件。";
   if (!metricField) return "请选择一个数值字段作为分析指标。";
   if (!groupField) return "请选择一个分类字段作为分组维度。";
   if (!getProfilesByType("numeric").some((profile) => profile.field === metricField)) {
@@ -1663,7 +2051,7 @@ function renderV2TrendChart(metricField, dateField) {
 
 function buildMetricDateTrend(dateField, metricField) {
   const items = [];
-  state.rows.forEach((row) => {
+  getAnalysisRows().forEach((row) => {
     const date = parseFieldDate(dateField, row[dateField]);
     const value = toNumber(row[metricField]);
     if (!date || value === null) return;
@@ -1767,6 +2155,9 @@ function runTemplateAnalysis() {
 }
 
 function validateTemplateMappings(template, mappings) {
+  if (!getAnalysisRows().length) {
+    return "当前筛选条件下没有可分析的记录，请调整或清除筛选条件。";
+  }
   for (const field of template.fields) {
     const selected = mappings[field.key];
     if (field.required && !selected) {
@@ -1903,7 +2294,7 @@ function analyzeSalesTemplate(mappings) {
     : null;
 
   const insights = [
-    `销售模板使用「${mappings.category}」和「${mappings.region}」进行分组，共分析 ${formatInteger(state.rows.length)} 行记录。`,
+    `销售模板使用「${mappings.category}」和「${mappings.region}」进行分组，共分析 ${formatInteger(getAnalysisRows().length)} 行记录。`,
     metricRows
       ? `销售数值基于「${metricLabel}」计算，有效数值记录为 ${formatInteger(metricRows.length)} 条。`
       : "未选择可计算的销售数值字段，因此仅按记录数做分组统计。",
@@ -2009,7 +2400,7 @@ function analyzeSurveyTemplate(mappings) {
   const primaryRows = primaryCategory ? frequencyRows(primaryCategory) : [];
   const chartValues = numericSummaries[0] ? getNumericValues(numericSummaries[0].field) : [];
   const insights = [
-    `问卷模板共选择 ${formatInteger(selectedFields.length)} 个字段，数据表总记录数为 ${formatInteger(state.rows.length)}。`,
+    `问卷模板共选择 ${formatInteger(selectedFields.length)} 个字段，当前分析记录数为 ${formatInteger(getAnalysisRows().length)}。`,
     numericSummaries[0]
       ? `数值字段「${numericSummaries[0].field}」的平均值为 ${formatFieldNumber(numericSummaries[0].field, numericSummaries[0].stats.mean)}，中位数为 ${formatFieldNumber(numericSummaries[0].field, numericSummaries[0].stats.median)}。`
       : "未选择可解析的数值字段，因此未生成满意度或年龄的数值统计。",
@@ -2023,7 +2414,7 @@ function analyzeSurveyTemplate(mappings) {
     cards: [
       ["模板", "问卷调查分析"],
       ["已选字段", formatInteger(selectedFields.length)],
-      ["记录数", formatInteger(state.rows.length)],
+      ["记录数", formatInteger(getAnalysisRows().length)],
       ["主分类字段", primaryCategory || "未选择"]
     ],
     insights,
@@ -2041,7 +2432,7 @@ function analyzeSurveyTemplate(mappings) {
 function analyzeBehaviorTemplate(mappings) {
   const eventRows = frequencyRows(mappings.event);
   const userCounts = countNonMissingValues(mappings.userId);
-  const uniqueUsers = new Set(state.rows.map((row) => displayValue(row[mappings.userId])).filter(Boolean)).size;
+  const uniqueUsers = new Set(getAnalysisRows().map((row) => displayValue(row[mappings.userId])).filter(Boolean)).size;
   const avgEventsPerUser = uniqueUsers ? userCounts / uniqueUsers : 0;
   const secondaryField = mappings.channel || mappings.device || "";
   const secondaryRows = secondaryField ? frequencyRows(secondaryField) : topUserRows(mappings.userId);
@@ -2090,7 +2481,7 @@ function buildSalesMetricRows(mappings) {
   }
   else return null;
 
-  const rows = state.rows
+  const rows = getAnalysisRows()
     .map((row) => ({ row, value: getSalesMetricValue(row, mappings) }))
     .filter((item) => item.value !== null);
   rows.label = label;
@@ -2112,7 +2503,7 @@ function getSalesMetricValue(row, mappings) {
 
 function groupNumericFieldByCategory(metricField, groupField) {
   const groups = new Map();
-  state.rows.forEach((row) => {
+  getAnalysisRows().forEach((row) => {
     const value = toNumber(row[metricField]);
     if (value === null) return;
     const groupName = displayValue(row[groupField]) || "未填写";
@@ -2151,7 +2542,7 @@ function summarizeGroupedValues(groups) {
 
 function buildTrendFromRows(dateField, valueGetter, aggregate) {
   const items = [];
-  state.rows.forEach((row) => {
+  getAnalysisRows().forEach((row) => {
     const date = parseFieldDate(dateField, row[dateField]);
     if (!date) return;
     if (aggregate === "count") {
@@ -2313,16 +2704,16 @@ function histogramChartConfig(title, values, axisLabel, sourceField = "") {
   };
 }
 
-function fieldHasNumericData(field) {
-  return getNumericValues(field).length > 0;
+function fieldHasNumericData(field, rows = getAnalysisRows()) {
+  return getNumericValues(field, rows).length > 0;
 }
 
-function fieldHasDateData(field) {
-  return state.rows.some((row) => Boolean(parseFieldDate(field, row[field])));
+function fieldHasDateData(field, rows = getAnalysisRows()) {
+  return rows.some((row) => Boolean(parseFieldDate(field, row[field])));
 }
 
-function countNonMissingValues(field) {
-  return state.rows.filter((row) => !isMissing(row[field])).length;
+function countNonMissingValues(field, rows = getAnalysisRows()) {
+  return rows.filter((row) => !isMissing(row[field])).length;
 }
 
 function buildTrendInsight(dateField) {
@@ -2347,7 +2738,7 @@ function buildTrendInsight(dateField) {
 
 function buildDateTrend(dateField, numericField) {
   const items = [];
-  state.rows.forEach((row) => {
+  getAnalysisRows().forEach((row) => {
     const date = parseFieldDate(dateField, row[dateField]);
     if (!date) return;
     const value = numericField ? toNumber(row[numericField]) : null;
@@ -2391,7 +2782,7 @@ function buildDateTrend(dateField, numericField) {
 
 function aggregateByCategory(metricField, groupField, method) {
   const groups = new Map();
-  state.rows.forEach((row) => {
+  getAnalysisRows().forEach((row) => {
     const group = displayValue(row[groupField]) || "未填写";
     const value = toNumber(row[metricField]);
     if (value === null) return;
@@ -2493,9 +2884,12 @@ function resetAnalysisState() {
   Object.keys(state.charts).forEach((id) => destroyChart(id));
   state.charts = {};
   state.rows = [];
+  state.filteredRows = null;
+  state.filterSourceRows = null;
   state.fields = [];
   state.profiles = [];
   state.numericStats = [];
+  state.qualityNumericStats = [];
   state.categoryStats = [];
   state.duplicateRows = 0;
   state.totalMissing = 0;
@@ -2509,6 +2903,9 @@ function resetAnalysisState() {
   state.analysisCompletedAt = null;
   state.insights = [];
   state.customAnalysis = null;
+  state.filters = createEmptyFilterConfig();
+  state.categoryFilterOptions = [];
+  state.categoryFilterDraftValues = new Set();
 
   document.body.classList.remove("has-results");
   setReportExportStatus("");
@@ -2523,6 +2920,24 @@ function resetAnalysisState() {
   dom.fieldConfigMessage.className = "field-config-message";
   dom.applyFieldConfig.disabled = true;
   dom.restoreAutoFieldTypes.disabled = true;
+  dom.categoryFilterField.innerHTML = "";
+  dom.categoryFilterSearch.value = "";
+  dom.categoryFilterValues.innerHTML = "";
+  dom.categoryFilterControls.classList.add("hidden");
+  dom.categoryFilterEmpty.classList.remove("hidden");
+  dom.categoryFilterSelectionCount.textContent = "未选择字段";
+  dom.numericFilterField.innerHTML = "";
+  dom.numericFilterMin.value = "";
+  dom.numericFilterMax.value = "";
+  dom.numericFilterRange.textContent = "请选择字段";
+  dom.dateFilterField.innerHTML = "";
+  dom.dateFilterStart.value = "";
+  dom.dateFilterEnd.value = "";
+  dom.dateFilterRange.textContent = "请选择字段";
+  dom.filterOriginalCount.textContent = "0";
+  dom.filterCurrentCount.textContent = "0";
+  dom.filterExcludedCount.textContent = "0";
+  setFilterMessage("尚未应用筛选，当前分析使用全部记录。", "");
   dom.qualitySummary.innerHTML = "";
   dom.qualityTable.innerHTML = "";
   dom.outlierTable.innerHTML = "";
@@ -2568,9 +2983,9 @@ function countDuplicateRows(rows, fields) {
   return duplicates;
 }
 
-function countValues(field) {
+function countValues(field, rows = getAnalysisRows()) {
   const counts = new Map();
-  state.rows.forEach((row) => {
+  rows.forEach((row) => {
     if (isMissing(row[field])) return;
     const value = displayValue(row[field]);
     counts.set(value, (counts.get(value) || 0) + 1);
@@ -2578,8 +2993,8 @@ function countValues(field) {
   return counts;
 }
 
-function getNumericValues(field) {
-  return state.rows
+function getNumericValues(field, rows = getAnalysisRows()) {
+  return rows
     .map((row) => toNumber(row[field]))
     .filter((value) => value !== null);
 }
@@ -3053,6 +3468,8 @@ function isSafeChartDataUrl(value) {
 function buildReportData(now = new Date()) {
   const exportedAt = normalizeReportDate(now, new Date());
   const analysisAt = normalizeReportDate(state.analysisCompletedAt, exportedAt);
+  const analysisRows = getAnalysisRows();
+  const qualityNumericStats = getQualityNumericStats();
   const activeProfiles = getActiveProfiles();
   const fieldTypes = state.profiles.map((profile) => ({
     field: profile.field,
@@ -3095,7 +3512,9 @@ function buildReportData(now = new Date()) {
     analysisTimeIso: analysisAt.toISOString(),
     exportTime: formatReportDateTime(exportedAt),
     dataScale: {
-      rows: state.rows.length,
+      rows: analysisRows.length,
+      originalRows: state.rows.length,
+      filteredOutRows: Math.max(0, state.rows.length - analysisRows.length),
       fields: state.fields.length,
       activeFields: activeProfiles.length,
       numericFields: getProfilesByType("numeric").length,
@@ -3119,7 +3538,7 @@ function buildReportData(now = new Date()) {
         missingCount: profile.missingCount,
         missingRate: formatPercent(profile.missingRate)
       })),
-      outliers: state.numericStats.map((stat) => ({
+      outliers: qualityNumericStats.map((stat) => ({
         field: stat.field,
         outlierCount: stat.outlierCount,
         lowerBound: formatFieldNumber(stat.field, stat.lowerBound),
@@ -3252,6 +3671,8 @@ function normalizeReportSnapshot(reportData = {}) {
     exportTime: reportData.exportTime || "—",
     dataScale: {
       rows: 0,
+      originalRows: dataScale.rows ?? 0,
+      filteredOutRows: 0,
       fields: 0,
       activeFields: 0,
       numericFields: 0,
@@ -3390,7 +3811,9 @@ function buildHtmlReport(reportData, chartImages = []) {
     <h2>数据规模</h2>
     <div class="scale-grid">
       ${[
-        ["数据行数", reportData.dataScale.rows],
+        ["当前分析行数", reportData.dataScale.rows],
+        ["原始数据行数", reportData.dataScale.originalRows],
+        ["筛除行数", reportData.dataScale.filteredOutRows],
         ["字段总数", reportData.dataScale.fields],
         ["参与分析字段", reportData.dataScale.activeFields],
         ["数值字段", reportData.dataScale.numericFields],
@@ -3493,7 +3916,9 @@ function buildMarkdownReport(reportData) {
     buildMarkdownTable(
       ["指标", "数量"],
       [
-        ["数据行数", reportData.dataScale.rows],
+        ["当前分析行数", reportData.dataScale.rows],
+        ["原始数据行数", reportData.dataScale.originalRows],
+        ["筛除行数", reportData.dataScale.filteredOutRows],
         ["字段总数", reportData.dataScale.fields],
         ["参与分析字段", reportData.dataScale.activeFields],
         ["数值字段", reportData.dataScale.numericFields],

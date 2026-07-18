@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
   <a class="skip-link" href="#mainContent">跳到主要内容</a>
@@ -24,7 +25,7 @@
           <strong>Smart CSV Analyzer</strong>
           <small>CSV 智能分析工作台</small>
         </span>
-        <span class="version-badge">V1.0</span>
+        <span class="version-badge">V2.3</span>
       </a>
       <div class="header-actions">
         <span class="privacy-badge">
@@ -43,7 +44,7 @@
     <section class="hero-section" aria-labelledby="heroTitle">
       <div class="hero-copy">
         <p class="eyebrow"><span></span> Browser-based data workspace</p>
-        <h1 id="heroTitle">让每一份 CSV，<br><em>更快抵达结论。</em></h1>
+        <h1 id="heroTitle">让每一份数据，<br><em>更快抵达结论。</em></h1>
         <p class="subtitle">无需代码与复杂配置，上传文件即可获得字段识别、质量诊断、统计图表和场景化洞察。</p>
         <div class="workflow-list" aria-label="分析流程">
           <div><span>01</span><strong>导入数据</strong><small>支持多种中文编码</small></div>
@@ -61,14 +62,14 @@
         </div>
         <div class="upload-copy">
           <p class="section-kicker">Upload workspace</p>
-          <h2 id="uploadTitle">拖放 CSV 文件到这里</h2>
+          <h2 id="uploadTitle">拖放 CSV 或 Excel 文件到这里</h2>
           <p>或从本地选择文件，解析过程仅在当前浏览器中完成。</p>
         </div>
         <label class="file-button" for="csvFile">
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 13.8V3.5m0 0L6.4 7.1M10 3.5l3.6 3.6M4 12.5v2.3a1.7 1.7 0 0 0 1.7 1.7h8.6a1.7 1.7 0 0 0 1.7-1.7v-2.3" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"/></svg>
-          选择 CSV 文件
+          选择数据文件
         </label>
-        <input id="csvFile" type="file" accept=".csv,text/csv">
+        <input id="csvFile" type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel">
         <div class="upload-actions">
           <label class="encoding-control" for="fileEncoding">
             <span>文件编码</span>
@@ -86,7 +87,7 @@
           <a class="secondary-button" href="sample-data.csv" download>下载样例</a>
         </div>
         <div class="upload-meta">
-          <span>CSV / 表头行</span>
+          <span>CSV / XLSX / XLS</span>
           <span>UTF-8 / GBK / GB18030</span>
           <span>自动字段识别</span>
         </div>
@@ -94,6 +95,22 @@
     </section>
 
     <section id="statusPanel" class="status-panel hidden" aria-live="polite"></section>
+
+    <section id="sheetSelectionPanel" class="sheet-selection-panel hidden" aria-labelledby="sheetSelectionTitle">
+      <div>
+        <p class="section-kicker">Excel workbook</p>
+        <h2 id="sheetSelectionTitle">选择要分析的工作表</h2>
+        <p id="excelWorkbookName" class="muted"></p>
+      </div>
+      <div class="sheet-selection-controls">
+        <label for="excelSheetSelect">
+          工作表
+          <select id="excelSheetSelect"></select>
+        </label>
+        <button id="confirmSheetSelection" type="button">分析所选工作表</button>
+      </div>
+      <p id="sheetSelectionMessage" class="sheet-selection-message" aria-live="polite"></p>
+    </section>
 
     <section id="results" class="results hidden" aria-label="分析报告">
       <aside class="results-nav" aria-label="报告目录">
@@ -103,7 +120,7 @@
         </div>
         <nav>
           <a class="active" href="#overviewSection"><span>01</span>数据概览</a>
-          <a href="#schemaSection"><span>02</span>字段识别</a>
+          <a href="#schemaSection"><span>02</span>字段配置</a>
           <a href="#qualitySection"><span>03</span>数据质量</a>
           <a href="#statisticsSection"><span>04</span>描述统计</a>
           <a href="#chartsSection"><span>05</span>图表分析</a>
@@ -111,6 +128,14 @@
           <a href="#insightsSection"><span>07</span>分析结论</a>
         </nav>
         <a class="nav-new-analysis" href="#dropZone">＋ 分析新文件</a>
+        <div class="report-actions" aria-labelledby="reportActionsTitle">
+          <div class="report-actions-copy">
+            <strong id="reportActionsTitle">导出报告</strong>
+            <small id="reportExportHint">报告在浏览器本地生成，数据不会上传</small>
+          </div>
+          <button id="exportHtmlReport" type="button" aria-describedby="reportExportHint" disabled>导出 HTML 报告</button>
+          <button id="exportMarkdownReport" type="button" aria-describedby="reportExportHint" disabled>导出 Markdown 报告</button>
+        </div>
       </aside>
 
       <section id="overviewSection" class="section-block">
@@ -134,11 +159,19 @@
         <div class="section-heading">
           <div>
             <p class="section-kicker">Schema</p>
-            <h2>字段类型识别</h2>
+            <h2>字段类型确认与修正</h2>
+          </div>
+        </div>
+        <p class="section-note">系统会自动推断字段类型。修改配置后点击“应用字段配置”，统计、图表和分析结论才会统一重新计算；无法安全转换的非空值会被跳过并计入失败数量。</p>
+        <div class="field-config-toolbar">
+          <p id="fieldConfigMessage" class="field-config-message" aria-live="polite"></p>
+          <div class="field-config-actions">
+            <button id="restoreAutoFieldTypes" class="secondary-button" type="button" disabled>恢复自动识别</button>
+            <button id="applyFieldConfig" type="button" disabled>应用字段配置</button>
           </div>
         </div>
         <div class="table-wrap">
-          <table id="schemaTable"></table>
+          <table id="schemaTable" aria-describedby="fieldConfigMessage"></table>
         </div>
       </section>
 

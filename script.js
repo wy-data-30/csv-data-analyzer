@@ -44,6 +44,10 @@ const dom = {
   results: document.getElementById("results"),
   reportTitle: document.getElementById("reportTitle"),
   sourceName: document.getElementById("sourceName"),
+  mobileSectionNav: document.getElementById("mobileSectionNav"),
+  globalFilterStatus: document.getElementById("globalFilterStatus"),
+  globalFilterSummary: document.getElementById("globalFilterSummary"),
+  globalClearFilters: document.getElementById("globalClearFilters"),
   overviewCards: document.getElementById("overviewCards"),
   insights: document.getElementById("insights"),
   previewTable: document.getElementById("previewTable"),
@@ -81,16 +85,25 @@ const dom = {
   numericChartField: document.getElementById("numericChartField"),
   categoryChartField: document.getElementById("categoryChartField"),
   dateChartField: document.getElementById("dateChartField"),
+  numericChartTitle: document.getElementById("numericChartTitle"),
+  categoryChartTitle: document.getElementById("categoryChartTitle"),
+  dateChartTitle: document.getElementById("dateChartTitle"),
   metricField: document.getElementById("metricField"),
   groupField: document.getElementById("groupField"),
   aggregateMethod: document.getElementById("aggregateMethod"),
   v2MetricField: document.getElementById("v2MetricField"),
   v2GroupField: document.getElementById("v2GroupField"),
+  v2AggregateMethod: document.getElementById("v2AggregateMethod"),
   v2DateField: document.getElementById("v2DateField"),
   v2AnalyzeButton: document.getElementById("v2AnalyzeButton"),
   v2FieldPrompt: document.getElementById("v2FieldPrompt"),
   v2AnalysisResults: document.getElementById("v2AnalysisResults"),
   v2SummaryCards: document.getElementById("v2SummaryCards"),
+  v2ResultSummary: document.getElementById("v2ResultSummary"),
+  v2PrimaryTable: document.getElementById("v2PrimaryTable"),
+  v2PrimaryTableTitle: document.getElementById("v2PrimaryTableTitle"),
+  v2TopGroupTitle: document.getElementById("v2TopGroupTitle"),
+  v2TrendTitle: document.getElementById("v2TrendTitle"),
   v2SumTable: document.getElementById("v2SumTable"),
   v2AvgTable: document.getElementById("v2AvgTable"),
   v2TrendCard: document.getElementById("v2TrendCard"),
@@ -106,6 +119,7 @@ const dom = {
   templateSecondaryChartTitle: document.getElementById("templateSecondaryChartTitle"),
   templateTrendCard: document.getElementById("templateTrendCard"),
   templateTrendChartTitle: document.getElementById("templateTrendChartTitle"),
+  customAnalysisChartTitle: document.getElementById("customAnalysisChartTitle"),
   dataExportOriginalCount: document.getElementById("dataExportOriginalCount"),
   dataExportFilteredCount: document.getElementById("dataExportFilteredCount"),
   dataExportDeduplicatedCount: document.getElementById("dataExportDeduplicatedCount"),
@@ -274,6 +288,7 @@ dom.dropZone.addEventListener("drop", (event) => {
 ].forEach((control) => control.addEventListener("change", renderCharts));
 
 dom.v2AnalyzeButton.addEventListener("click", renderV2Analysis);
+dom.globalClearFilters.addEventListener("click", clearAllFilters);
 
 dom.scenarioTemplate.addEventListener("change", () => {
   renderTemplateMappingForm();
@@ -334,16 +349,28 @@ function setupResultNavigation() {
         link.removeAttribute("aria-current");
       }
     });
+    if (dom.mobileSectionNav && dom.mobileSectionNav.value !== sectionId) {
+      dom.mobileSectionNav.value = sectionId;
+    }
+  };
+
+  const navigateToSection = (sectionId) => {
+    const section = document.getElementById(sectionId);
+    if (!section) return;
+    setActiveLink(sectionId);
+    window.history.replaceState(null, "", `#${sectionId}`);
+    section.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   links.forEach((link) => {
     link.addEventListener("click", (event) => {
       event.preventDefault();
-      const sectionId = link.getAttribute("href").slice(1);
-      setActiveLink(sectionId);
-      window.history.replaceState(null, "", `#${sectionId}`);
-      document.getElementById(sectionId)?.scrollIntoView({ block: "start" });
+      navigateToSection(link.getAttribute("href").slice(1));
     });
+  });
+
+  dom.mobileSectionNav?.addEventListener("change", () => {
+    navigateToSection(dom.mobileSectionNav.value);
   });
 
   let navigationFrame = null;
@@ -355,7 +382,8 @@ function setupResultNavigation() {
       return;
     }
 
-    const readingLine = Math.min(320, window.innerHeight * 0.35);
+    const navigationHeight = document.querySelector(".results-nav")?.getBoundingClientRect?.().height || 0;
+    const readingLine = Math.max(150, Math.min(320, window.innerHeight * 0.35, navigationHeight + 130));
     const currentSection = sections.reduce((current, section) => (
       section.getBoundingClientRect().top <= readingLine ? section : current
     ), sections[0]);
@@ -1031,25 +1059,24 @@ function renderOverview() {
   const activeProfiles = getActiveProfiles();
   const numericCount = getProfilesByType("numeric").length;
   const categoryCount = getProfilesByType("category").length;
-  const dateCount = getProfilesByType("date").length;
-  const ignoredCount = getProfilesByType("ignore").length;
+  const activeMissing = analysisRows.reduce((total, row) => (
+    total + activeProfiles.filter((profile) => isMissing(row[profile.field])).length
+  ), 0);
+  const rowValue = hasActiveFilters()
+    ? `${formatInteger(state.rows.length)} → ${formatInteger(analysisRows.length)}`
+    : state.rows.length;
   const cards = [
-    ["原始行数", state.rows.length],
-    ["当前分析行数", analysisRows.length],
-    ["总字段数", state.fields.length],
-    ["参与分析字段数", activeProfiles.length],
-    ["数值字段数量", numericCount],
-    ["分类字段数量", categoryCount],
-    ["日期字段数量", dateCount],
-    ["忽略字段数量", ignoredCount],
-    ["缺失值总数", state.totalMissing],
-    ["重复行数量", state.duplicateRows]
+    [hasActiveFilters() ? "总记录 → 当前分析" : "总记录数", rowValue],
+    ["字段数", state.fields.length],
+    ["数值字段数", numericCount],
+    ["分类字段数", categoryCount],
+    ["缺失值概览", activeMissing]
   ];
 
   dom.overviewCards.innerHTML = cards.map(([label, value]) => `
     <div class="metric-card">
       <div class="metric-label">${escapeHtml(label)}</div>
-      <div class="metric-value">${formatInteger(value)}</div>
+      <div class="metric-value">${typeof value === "number" ? formatInteger(value) : escapeHtml(value)}</div>
     </div>
   `).join("");
 }
@@ -1077,9 +1104,7 @@ function renderInsights() {
     insights.push(`数据集包含 ${formatInteger(state.fields.length)} 个原始字段。`);
     insights.push("所有字段均已设为忽略，因此未生成统计、图表或字段相关的自动结论。");
     state.insights = insights;
-    dom.insights.innerHTML = insights.map((text) => `
-      <div class="insight-item">${escapeHtml(text)}</div>
-    `).join("");
+    renderInsightGroups(insights);
     return;
   }
 
@@ -1087,9 +1112,7 @@ function renderInsights() {
     insights.push(scopeText);
     insights.push("当前筛选条件下没有记录，因此未生成描述性统计、分类分布或趋势结论。请调整或清除筛选条件。");
     state.insights = insights;
-    dom.insights.innerHTML = insights.map((text) => `
-      <div class="insight-item">${escapeHtml(text)}</div>
-    `).join("");
+    renderInsightGroups(insights);
     return;
   }
 
@@ -1124,9 +1147,31 @@ function renderInsights() {
   }
 
   state.insights = insights;
-  dom.insights.innerHTML = insights.map((text) => `
+  renderInsightGroups(insights);
+}
+
+function renderInsightGroups(insights) {
+  const findings = insights.slice(1);
+  const keyFindings = findings.slice(0, 3);
+  const otherFindings = findings.slice(3);
+  const scopeLabel = hasActiveFilters()
+    ? `基于当前筛选数据：${formatInteger(getAnalysisRows().length)} / ${formatInteger(state.rows.length)} 行`
+    : `基于完整数据：${formatInteger(state.rows.length)} 行`;
+  const renderItems = (items) => items.map((text) => `
     <div class="insight-item">${escapeHtml(text)}</div>
   `).join("");
+
+  dom.insights.innerHTML = `
+    <p class="insight-scope">${escapeHtml(scopeLabel)}</p>
+    <h3 class="insight-group-title">关键发现</h3>
+    <div class="insights">${renderItems(keyFindings)}</div>
+    ${otherFindings.length ? `
+      <details class="insights-more">
+        <summary>其他发现（${formatInteger(otherFindings.length)}）</summary>
+        <div class="insights">${renderItems(otherFindings)}</div>
+      </details>
+    ` : ""}
+  `;
 }
 
 function renderPreview() {
@@ -1152,12 +1197,9 @@ function renderSchema() {
     <thead>
       <tr>
         <th>字段名</th>
-        <th>自动识别类型</th>
         <th>确认类型</th>
-        <th>非空值数量</th>
-        <th>唯一值数量</th>
         <th>示例值</th>
-        <th>转换失败数量</th>
+        <th>字段详情</th>
       </tr>
     </thead>
     <tbody>
@@ -1172,7 +1214,6 @@ function renderSchema() {
         return `
           <tr>
             <td>${escapeHtml(profile.field)}</td>
-            <td><span class="type-badge ${profile.inferredTypeKey}">${escapeHtml(profile.inferredType)}</span></td>
             <td>
               <select class="schema-type-select" data-field-type="${escapeHtml(profile.field)}" aria-label="调整 ${escapeHtml(profile.field)} 的字段类型">
                 ${Object.entries(FIELD_TYPE_LABELS).map(([typeKey, label]) => `
@@ -1180,13 +1221,18 @@ function renderSchema() {
                 `).join("")}
               </select>
             </td>
-            <td>${formatInteger(profile.nonMissingCount)}</td>
-            <td>${formatInteger(profile.uniqueCount)}</td>
             <td><span class="schema-example" title="${escapeHtml(exampleText)}">${escapeHtml(exampleText)}</span></td>
             <td>
-              <span class="conversion-failure-count${failureCount ? " warning" : ""}" title="${requiresConversion ? "非空值中无法安全转换的数量" : "该类型不需要转换"}" aria-label="${escapeHtml(failureLabel)}">
-                ${requiresConversion ? formatInteger(failureCount) : "—"}
-              </span>
+              <details class="schema-details">
+                <summary>查看详情</summary>
+                <dl class="schema-detail-list">
+                  <dt>自动类型</dt><dd><span class="type-badge ${profile.inferredTypeKey}">${escapeHtml(profile.inferredType)}</span></dd>
+                  <dt>非空值</dt><dd>${formatInteger(profile.nonMissingCount)}</dd>
+                  <dt>唯一值</dt><dd>${formatInteger(profile.uniqueCount)}</dd>
+                  <dt>转换失败</dt>
+                  <dd><span class="conversion-failure-count${failureCount ? " warning" : ""}" title="${requiresConversion ? "非空值中无法安全转换的数量" : "该类型不需要转换"}" aria-label="${escapeHtml(failureLabel)}">${requiresConversion ? formatInteger(failureCount) : "—"}</span></dd>
+                </dl>
+              </details>
             </td>
           </tr>
         `;
@@ -1586,6 +1632,19 @@ function renderFilterCounts() {
   dom.filterOriginalCount.textContent = formatInteger(state.rows.length);
   dom.filterCurrentCount.textContent = formatInteger(currentCount);
   dom.filterExcludedCount.textContent = formatInteger(Math.max(0, state.rows.length - currentCount));
+  updateGlobalFilterStatus();
+}
+
+function updateGlobalFilterStatus() {
+  if (!dom.globalFilterSummary) return;
+  const activeCount = [state.filters.category, state.filters.numeric, state.filters.date].filter(Boolean).length;
+  const currentCount = getAnalysisRows().length;
+  const totalCount = state.rows.length;
+  dom.globalFilterSummary.textContent = activeCount
+    ? `已筛选 ${formatInteger(activeCount)} 项 · ${formatInteger(currentCount)} / ${formatInteger(totalCount)} 行`
+    : `全部 ${formatInteger(totalCount)} 行`;
+  dom.globalFilterStatus.classList.toggle("active", activeCount > 0);
+  dom.globalClearFilters.classList.toggle("hidden", activeCount === 0);
 }
 
 function setFilterMessage(message, tone = "") {
@@ -1789,6 +1848,8 @@ function renderNumericDistributionChart() {
   const field = dom.numericChartField.value;
   const canvas = document.getElementById("numericDistributionChart");
   destroyChart("numericDistributionChart");
+  dom.numericChartTitle.textContent = field ? `${field} 数值分布（记录频数）` : "数值字段分布（记录频数）";
+  canvas.setAttribute("aria-label", dom.numericChartTitle.textContent);
   if (!field) return drawEmptyChart(canvas, "没有可用的数值字段");
 
   const values = getNumericValues(field);
@@ -1799,12 +1860,12 @@ function renderNumericDistributionChart() {
     data: {
       labels: bins.map((bin) => bin.label),
       datasets: [{
-        label: `${field} 分布`,
+        label: `${field} 分布（记录频数）`,
         data: bins.map((bin) => bin.count),
         backgroundColor: CHART_THEME.primary
       }]
     },
-    options: chartOptions("数量")
+    options: chartOptions("记录频数")
   });
 }
 
@@ -1812,6 +1873,8 @@ function renderCategoryTopChart() {
   const field = dom.categoryChartField.value;
   const canvas = document.getElementById("categoryTopChart");
   destroyChart("categoryTopChart");
+  dom.categoryChartTitle.textContent = field ? `${field} Top 10（记录数）` : "分类字段 Top 10（记录数）";
+  canvas.setAttribute("aria-label", dom.categoryChartTitle.textContent);
   if (!field) return drawEmptyChart(canvas, "没有可用的分类字段");
 
   const counts = Array.from(countValues(field).entries())
@@ -1823,12 +1886,12 @@ function renderCategoryTopChart() {
     data: {
       labels: counts.map(([name]) => name),
       datasets: [{
-        label: `${field} Top 10`,
+        label: `${field} Top 10（记录数）`,
         data: counts.map(([, count]) => count),
         backgroundColor: CHART_THEME.secondary
       }]
     },
-    options: chartOptions("频数")
+    options: chartOptions("记录数")
   });
 }
 
@@ -1842,6 +1905,14 @@ function renderDateTrendChart() {
     .find((profile) => fieldHasNumericData(profile.field))?.field;
   const trend = buildDateTrend(field, numericField);
   if (!trend.labels.length) return drawEmptyChart(canvas, "该字段没有可安全转换的有效日期");
+  const timeUnit = getDateGranularity(field) === "year"
+    ? "年份"
+    : trend.labels.some((label) => /^\d{4}-\d{2}$/.test(label)) ? "月份" : "日期";
+  const aggregationLabel = numericField ? "平均值" : "记录数";
+  dom.dateChartTitle.textContent = numericField
+    ? `${numericField} 按${timeUnit}趋势（${aggregationLabel}）`
+    : `${field} 按${timeUnit}趋势（${aggregationLabel}）`;
+  canvas.setAttribute("aria-label", dom.dateChartTitle.textContent);
   state.charts.dateTrendChart = new Chart(canvas, {
     type: "line",
     data: {
@@ -1865,6 +1936,11 @@ function renderCustomAnalysisChart() {
   const method = dom.aggregateMethod.value;
   const canvas = document.getElementById("customAnalysisChart");
   destroyChart("customAnalysisChart");
+  const methodLabel = { sum: "合计", avg: "平均值", median: "中位数" }[method];
+  dom.customAnalysisChartTitle.textContent = metric && group
+    ? `${metric} 按 ${group} 分组（${methodLabel}）`
+    : "分组聚合结果";
+  canvas.setAttribute("aria-label", dom.customAnalysisChartTitle.textContent);
 
   if (!metric || !group) {
     return drawEmptyChart(canvas, "请选择数值字段和分类字段");
@@ -1872,7 +1948,6 @@ function renderCustomAnalysisChart() {
 
   const grouped = aggregateByCategory(metric, group, method).slice(0, 12);
   if (!grouped.length) return drawEmptyChart(canvas, "当前筛选结果中没有可计算的分组记录");
-  const methodLabel = { sum: "合计", avg: "平均值", median: "中位数" }[method];
   state.charts.customAnalysisChart = new Chart(canvas, {
     type: "bar",
     data: {
@@ -1893,13 +1968,15 @@ function resetV2AnalysisState() {
   state.customAnalysis = null;
   dom.v2AnalysisResults.classList.add("hidden");
   dom.v2FieldPrompt.className = "analysis-prompt";
-  dom.v2FieldPrompt.textContent = "请选择一个数值指标字段和一个分类分组字段，再点击“生成自定义分析”。时间字段为可选。";
+  dom.v2FieldPrompt.textContent = "请选择指标字段、分组维度和聚合方式，再点击“生成自定义分析”。时间字段为可选。";
 }
 
 function renderV2Analysis() {
   const metricField = dom.v2MetricField.value;
   const groupField = dom.v2GroupField.value;
+  const aggregateMethod = dom.v2AggregateMethod.value;
   const dateField = dom.v2DateField.value;
+  const aggregateLabel = getAggregateMethodLabel(aggregateMethod);
 
   destroyChart("v2TopGroupChart");
   destroyChart("v2SelectedTrendChart");
@@ -1924,25 +2001,30 @@ function renderV2Analysis() {
 
   dom.v2FieldPrompt.className = "analysis-prompt";
   dom.v2FieldPrompt.textContent = dateField
-    ? "已按所选字段生成分组汇总和时间趋势。"
-    : "已按所选字段生成分组汇总；未选择时间字段，因此不生成时间趋势图。";
+    ? `已生成分组${aggregateLabel}汇总和时间趋势。`
+    : `已生成分组${aggregateLabel}汇总；未选择时间字段，因此不生成时间趋势图。`;
   dom.v2AnalysisResults.classList.remove("hidden");
 
   state.customAnalysis = {
     metricField,
     groupField,
+    aggregateMethod,
     dateField,
     grouped: grouped.map((item) => ({ ...item })),
-    trend: dateField ? buildMetricDateTrend(dateField, metricField) : null
+    trend: dateField ? buildMetricDateTrend(dateField, metricField, aggregateMethod) : null
   };
 
-  renderV2SummaryCards(metricField, groupField, dateField, grouped);
+  renderV2SummaryCards(metricField, groupField, aggregateMethod, dateField, grouped);
   renderV2AggregationTables(metricField, groupField, grouped);
-  renderV2TopGroupChart(metricField, groupField, grouped);
+  renderV2PrimaryTable(metricField, groupField, grouped, aggregateMethod);
+  renderV2TopGroupChart(metricField, groupField, grouped, aggregateMethod);
+  dom.v2ResultSummary.textContent = hasActiveFilters()
+    ? `已按 ${groupField} 对 ${metricField} 进行${aggregateLabel}，结果基于当前筛选数据 ${formatInteger(getAnalysisRows().length)} / ${formatInteger(state.rows.length)} 行。`
+    : `已按 ${groupField} 对 ${metricField} 进行${aggregateLabel}，结果基于完整数据 ${formatInteger(state.rows.length)} 行。`;
 
   if (dateField) {
     dom.v2TrendCard.classList.remove("hidden");
-    renderV2TrendChart(metricField, dateField);
+    renderV2TrendChart(metricField, dateField, aggregateMethod);
   } else {
     dom.v2TrendCard.classList.add("hidden");
   }
@@ -1969,14 +2051,14 @@ function buildV2GroupedStats(metricField, groupField) {
   return groupNumericFieldByCategory(metricField, groupField);
 }
 
-function renderV2SummaryCards(metricField, groupField, dateField, grouped) {
+function renderV2SummaryCards(metricField, groupField, aggregateMethod, dateField, grouped) {
   const validRecordCount = grouped.reduce((total, item) => total + item.count, 0);
-  const trendPointCount = dateField ? buildMetricDateTrend(dateField, metricField).labels.length : 0;
+  const trendPointCount = dateField ? buildMetricDateTrend(dateField, metricField, aggregateMethod).labels.length : 0;
   const cards = [
     ["分析指标", metricField],
     ["分组维度", groupField],
-    ["有效记录数", formatInteger(validRecordCount)],
-    [dateField ? "时间点数量" : "时间字段", dateField ? formatInteger(trendPointCount) : "未选择"]
+    ["聚合方式", getAggregateMethodLabel(aggregateMethod)],
+    [dateField ? "时间点数量" : "有效记录数", dateField ? formatInteger(trendPointCount) : formatInteger(validRecordCount)]
   ];
 
   dom.v2SummaryCards.innerHTML = cards.map(([label, value]) => `
@@ -1994,8 +2076,15 @@ function renderV2AggregationTables(metricField, groupField, grouped) {
   dom.v2AvgTable.innerHTML = buildV2AggregationTableHtml(groupField, metricField, byAvg, "avg");
 }
 
+function renderV2PrimaryTable(metricField, groupField, grouped, aggregateMethod) {
+  const sorted = [...grouped].sort((a, b) => b[aggregateMethod] - a[aggregateMethod]);
+  const aggregateLabel = getAggregateMethodLabel(aggregateMethod);
+  dom.v2PrimaryTableTitle.textContent = `${metricField} 按 ${groupField} 分组（${aggregateLabel}）`;
+  dom.v2PrimaryTable.innerHTML = buildV2AggregationTableHtml(groupField, metricField, sorted, aggregateMethod);
+}
+
 function buildV2AggregationTableHtml(groupField, metricField, rows, valueKey) {
-  const valueLabel = valueKey === "sum" ? "求和值" : "平均值";
+  const valueLabel = { sum: "求和值", avg: "平均值", median: "中位数" }[valueKey] || "汇总值";
   return `
     <thead>
       <tr>
@@ -2016,38 +2105,47 @@ function buildV2AggregationTableHtml(groupField, metricField, rows, valueKey) {
   `;
 }
 
-function renderV2TopGroupChart(metricField, groupField, grouped) {
+function renderV2TopGroupChart(metricField, groupField, grouped, aggregateMethod = "sum") {
   const canvas = document.getElementById("v2TopGroupChart");
   if (!window.Chart) return drawEmptyChart(canvas, "图表组件加载失败，请检查网络连接");
-  const topGroups = [...grouped].sort((a, b) => b.sum - a.sum).slice(0, 10);
+  const aggregateLabel = getAggregateMethodLabel(aggregateMethod);
+  const topGroups = [...grouped].sort((a, b) => b[aggregateMethod] - a[aggregateMethod]).slice(0, 10);
+  dom.v2TopGroupTitle.textContent = `${metricField} 按 ${groupField} 分组 Top 10（${aggregateLabel}）`;
+  canvas.setAttribute("aria-label", dom.v2TopGroupTitle.textContent);
   state.charts.v2TopGroupChart = new Chart(canvas, {
     type: "bar",
     data: {
       labels: topGroups.map((item) => item.name),
       datasets: [{
-        label: `${groupField} Top 10（${metricField} 求和）`,
-        data: topGroups.map((item) => item.sum),
+        label: `${metricField} 按 ${groupField} 分组（${aggregateLabel}）`,
+        data: topGroups.map((item) => item[aggregateMethod]),
         backgroundColor: CHART_THEME.primary
       }]
     },
-    options: chartOptions(numericAxisLabel(metricField, "求和值"), metricField)
+    options: chartOptions(numericAxisLabel(metricField, aggregateLabel), metricField)
   });
 }
 
-function renderV2TrendChart(metricField, dateField) {
+function renderV2TrendChart(metricField, dateField, aggregateMethod = "sum") {
   const canvas = document.getElementById("v2SelectedTrendChart");
   if (!window.Chart) return drawEmptyChart(canvas, "图表组件加载失败，请检查网络连接");
-  const trend = buildMetricDateTrend(dateField, metricField);
+  const trend = buildMetricDateTrend(dateField, metricField, aggregateMethod);
   if (!trend.labels.length) {
     return drawEmptyChart(canvas, "所选时间字段没有可用的趋势数据");
   }
 
+  const timeUnit = getDateGranularity(dateField) === "year"
+    ? "年份"
+    : trend.labels.some((label) => /^\d{4}-\d{2}$/.test(label)) ? "月份" : "日期";
+  const aggregateLabel = getAggregateMethodLabel(aggregateMethod);
+  dom.v2TrendTitle.textContent = `${metricField} 按${timeUnit}趋势（${aggregateLabel}）`;
+  canvas.setAttribute("aria-label", dom.v2TrendTitle.textContent);
   state.charts.v2SelectedTrendChart = new Chart(canvas, {
     type: "line",
     data: {
       labels: trend.labels,
       datasets: [{
-        label: `${metricField} 按${getDateGranularity(dateField) === "year" ? "年份" : "时间"}求和趋势`,
+        label: dom.v2TrendTitle.textContent,
         data: trend.values,
         borderColor: CHART_THEME.secondary,
         backgroundColor: CHART_THEME.secondaryFill,
@@ -2055,38 +2153,16 @@ function renderV2TrendChart(metricField, dateField) {
         fill: true
       }]
     },
-    options: chartOptions(numericAxisLabel(metricField, "求和值"), metricField)
+    options: chartOptions(numericAxisLabel(metricField, aggregateLabel), metricField)
   });
 }
 
-function buildMetricDateTrend(dateField, metricField) {
-  const items = [];
-  getAnalysisRows().forEach((row) => {
-    const date = parseFieldDate(dateField, row[dateField]);
-    const value = toNumber(row[metricField]);
-    if (!date || value === null) return;
-    items.push({ date, value });
-  });
+function buildMetricDateTrend(dateField, metricField, aggregateMethod = "sum") {
+  return buildTrendFromRows(dateField, (row) => toNumber(row[metricField]), aggregateMethod);
+}
 
-  if (!items.length) {
-    return { labels: [], values: [] };
-  }
-
-  items.sort((a, b) => a.date - b.date);
-  const spanDays = (items[items.length - 1].date - items[0].date) / 86400000;
-  const groupByMonth = spanDays > 120;
-  const groups = new Map();
-
-  items.forEach((item) => {
-    const key = getDateTrendKey(dateField, item.date, groupByMonth);
-    groups.set(key, (groups.get(key) || 0) + item.value);
-  });
-
-  const labels = Array.from(groups.keys()).sort();
-  return {
-    labels,
-    values: labels.map((label) => groups.get(label))
-  };
+function getAggregateMethodLabel(method) {
+  return { sum: "求和", avg: "平均值", median: "中位数" }[method] || "求和";
 }
 
 function getCurrentTemplate() {
@@ -2578,6 +2654,7 @@ function buildTrendFromRows(dateField, valueGetter, aggregate) {
   const values = labels.map((label) => {
     const bucket = groups.get(label);
     if (aggregate === "avg") return bucket.length ? mean(bucket) : 0;
+    if (aggregate === "median") return bucket.length ? median(bucket) : 0;
     return bucket.reduce((sum, value) => sum + value, 0);
   });
   return { labels, values };
@@ -2923,6 +3000,7 @@ function resetAnalysisState() {
 
   dom.sourceName.textContent = "";
   dom.sourceName.removeAttribute("title");
+  dom.reportTitle.textContent = "数据分析工作区";
   dom.overviewCards.innerHTML = "";
   dom.insights.innerHTML = "";
   dom.previewTable.innerHTML = "";
@@ -2962,6 +3040,8 @@ function resetAnalysisState() {
   dom.v2FieldPrompt.textContent = "";
   dom.v2FieldPrompt.className = "analysis-prompt";
   dom.v2SummaryCards.innerHTML = "";
+  dom.v2ResultSummary.textContent = "";
+  dom.v2PrimaryTable.innerHTML = "";
   dom.v2SumTable.innerHTML = "";
   dom.v2AvgTable.innerHTML = "";
   dom.templatePrompt.textContent = "";
@@ -2972,7 +3052,17 @@ function resetAnalysisState() {
   dom.v2AnalysisResults.classList.add("hidden");
   dom.templateResults.classList.add("hidden");
   dom.templateMappingForm.innerHTML = "";
+  document.querySelectorAll("#customSection details, #insightsSection details").forEach((details) => {
+    details.open = false;
+  });
+  document.querySelectorAll(".desktop-results-nav a").forEach((link, index) => {
+    link.classList.toggle("active", index === 0);
+    if (index === 0) link.setAttribute("aria-current", "location");
+    else link.removeAttribute("aria-current");
+  });
+  dom.mobileSectionNav.value = "overviewSection";
   dom.results.classList.add("hidden");
+  updateGlobalFilterStatus();
   updateExportButtons();
 }
 
@@ -3364,6 +3454,18 @@ const REPORT_CHART_TITLES = Object.freeze({
   templateTrendChart: "场景模板时间趋势"
 });
 
+const REPORT_CHART_HEADING_IDS = Object.freeze({
+  numericDistributionChart: "numericChartTitle",
+  categoryTopChart: "categoryChartTitle",
+  dateTrendChart: "dateChartTitle",
+  customAnalysisChart: "customAnalysisChartTitle",
+  v2TopGroupChart: "v2TopGroupTitle",
+  v2SelectedTrendChart: "v2TrendTitle",
+  templateMainChart: "templateMainChartTitle",
+  templateSecondaryChart: "templateSecondaryChartTitle",
+  templateTrendChart: "templateTrendChartTitle"
+});
+
 function canExportReport() {
   return Boolean(
     state.rows.length
@@ -3537,7 +3639,10 @@ function captureCurrentChartImages() {
       if (!isSafeChartDataUrl(dataUrl)) return [];
       return [{
         id,
-        title: REPORT_CHART_TITLES[id] || chart.data?.datasets?.[0]?.label || "分析图表",
+        title: document.getElementById(REPORT_CHART_HEADING_IDS[id])?.textContent?.trim()
+          || REPORT_CHART_TITLES[id]
+          || chart.data?.datasets?.[0]?.label
+          || "分析图表",
         dataUrl
       }];
     } catch {
@@ -3698,7 +3803,7 @@ function buildReportCustomAnalysis() {
     if (metricIsValid && groupIsValid) {
       const grouped = groupNumericFieldByCategory(metricField, groupField);
       if (grouped.length) {
-        current = { metricField, groupField, dateField: "", grouped, trend: null };
+        current = { metricField, groupField, aggregateMethod: dom.aggregateMethod?.value || "sum", dateField: "", grouped, trend: null };
       }
     }
   }
@@ -3718,21 +3823,24 @@ function buildReportCustomAnalysis() {
     minimum: formatFieldNumber(current.metricField, item.min),
     maximum: formatFieldNumber(current.metricField, item.max)
   }));
+  const aggregateMethod = current.aggregateMethod || "sum";
   const trendSummary = current.dateField
-    ? summarizeCustomTrend(current.dateField, current.metricField, current.trend)
+    ? summarizeCustomTrend(current.dateField, current.metricField, current.trend, aggregateMethod)
     : "";
 
   return {
     completed: true,
     metricField: current.metricField,
     groupField: current.groupField,
+    aggregateMethod,
+    aggregateLabel: getAggregateMethodLabel(aggregateMethod),
     dateField: current.dateField || "",
     rows,
     trendSummary
   };
 }
 
-function summarizeCustomTrend(dateField, metricField, trend) {
+function summarizeCustomTrend(dateField, metricField, trend, aggregateMethod = "sum") {
   if (!trend?.labels?.length) {
     return `日期字段「${dateField}」没有足够的有效记录生成自定义趋势。`;
   }
@@ -3741,7 +3849,7 @@ function summarizeCustomTrend(dateField, metricField, trend) {
   const direction = trend.values.length < 2
     ? "仅有一个时间点"
     : last > first ? "整体上升" : last < first ? "整体下降" : "整体持平";
-  return `按「${dateField}」观察，「${metricField}」求和值从 ${trend.labels[0]} 的 ${formatFieldNumber(metricField, first)} 变为 ${trend.labels[trend.labels.length - 1]} 的 ${formatFieldNumber(metricField, last)}，${direction}。`;
+  return `按「${dateField}」观察，「${metricField}」${getAggregateMethodLabel(aggregateMethod)}从 ${trend.labels[0]} 的 ${formatFieldNumber(metricField, first)} 变为 ${trend.labels[trend.labels.length - 1]} 的 ${formatFieldNumber(metricField, last)}，${direction}。`;
 }
 
 function normalizeReportSnapshot(reportData = {}) {
@@ -3824,6 +3932,7 @@ function buildHtmlReport(reportData, chartImages = []) {
     ? `
       <p><strong>指标字段：</strong>${escapeHtml(reportData.customAnalysis.metricField)}　
       <strong>分组字段：</strong>${escapeHtml(reportData.customAnalysis.groupField)}
+      ${reportData.customAnalysis.aggregateLabel ? `　<strong>聚合方式：</strong>${escapeHtml(reportData.customAnalysis.aggregateLabel)}` : ""}
       ${reportData.customAnalysis.dateField ? `　<strong>日期字段：</strong>${escapeHtml(reportData.customAnalysis.dateField)}` : ""}</p>
       ${reportData.customAnalysis.trendSummary ? `<p>${escapeHtml(reportData.customAnalysis.trendSummary)}</p>` : ""}
       ${buildHtmlReportTable(
@@ -4101,6 +4210,7 @@ function buildMarkdownReport(reportData) {
     lines.push(
       `- 指标字段：${escapeMarkdownText(reportData.customAnalysis.metricField)}`,
       `- 分组字段：${escapeMarkdownText(reportData.customAnalysis.groupField)}`,
+      ...(reportData.customAnalysis.aggregateLabel ? [`- 聚合方式：${escapeMarkdownText(reportData.customAnalysis.aggregateLabel)}`] : []),
       ...(reportData.customAnalysis.dateField ? [`- 日期字段：${escapeMarkdownText(reportData.customAnalysis.dateField)}`] : []),
       ...(reportData.customAnalysis.trendSummary ? [`- ${escapeMarkdownText(reportData.customAnalysis.trendSummary)}`] : []),
       "",

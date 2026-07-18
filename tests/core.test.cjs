@@ -47,7 +47,26 @@ assert.match(mobile640Source, /\.report-actions\s*\{[^}]*grid-template-columns:\
 assert.match(mobile640Source, /\.data-export-option\s*\{[^}]*grid-template-columns:\s*1fr;/s);
 assert.match(styleSource, /\.frequency-row\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+auto;/s);
 assert.match(styleSource, /\.results-nav\s*\{[^}]*position:\s*sticky;/s);
-assert.match(mobile640Source, /\.results-nav\s*\{[^}]*position:\s*static;/s);
+assert.match(mobile640Source, /\.results-nav\s*\{[^}]*position:\s*sticky;/s);
+assert.match(mobile640Source, /\.desktop-results-nav\s*\{[^}]*display:\s*none;/s);
+assert.match(mobile640Source, /\.mobile-results-nav\s*\{[^}]*display:\s*grid;/s);
+const resultSectionOrder = [
+  "overviewSection",
+  "schemaSection",
+  "qualitySection",
+  "filterSection",
+  "statisticsSection",
+  "chartsSection",
+  "customSection",
+  "insightsSection",
+  "exportSection"
+].map((id) => htmlSource.indexOf(`id="${id}"`));
+assert.equal(resultSectionOrder.every((position, index) => position >= 0 && (!index || position > resultSectionOrder[index - 1])), true);
+assert.match(htmlSource, /id="mobileSectionNav"/);
+assert.match(htmlSource, /id="globalFilterSummary"/);
+assert.match(htmlSource, /id="globalClearFilters"/);
+assert.match(htmlSource, /href="#exportSection"/);
+assert.doesNotMatch(htmlSource, /href="#(?:dataExportSection|reportSection)"/);
 assert.match(htmlSource, /<title>Smart Tabular Analyzer \| 智能表格数据分析工具<\/title>/);
 const legacyProductNamePattern = new RegExp(["Smart", "CSV", "Analyzer"].join(" "));
 assert.doesNotMatch(htmlSource, legacyProductNamePattern);

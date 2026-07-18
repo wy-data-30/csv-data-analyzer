@@ -1386,6 +1386,15 @@ select:hover {
   color: var(--text-secondary);
 }
 
+.app-footer a {
+  color: inherit;
+  text-underline-offset: 2px;
+}
+
+.app-footer a:hover {
+  color: var(--primary);
+}
+
 .hidden {
   display: none !important;
 }

@@ -3464,7 +3464,7 @@ function buildHtmlReport(reportData, chartImages = []) {
       ? `<ol class="insights">${reportData.insights.map((insight) => `<li>${escapeHtml(insight)}</li>`).join("")}</ol>`
       : `<p class="empty">暂无自动分析结论。</p>`}
   </section>
-  <footer>由 Smart Tabular Analyzer ${escapeHtml(reportData.version)} 在浏览器本地生成；数据未上传。</footer>
+  <footer>由 <a href="https://github.com/wy-data-30/smart-tabular-analyzer">Smart Tabular Analyzer</a> ${escapeHtml(reportData.version)} 在浏览器本地生成；数据未上传。</footer>
 </main>
 </body>
 </html>`;
@@ -3611,7 +3611,7 @@ function buildMarkdownReport(reportData) {
   } else {
     lines.push("暂无自动分析结论。");
   }
-  lines.push("", `> 由 Smart Tabular Analyzer ${escapeMarkdownText(reportData.version)} 在浏览器本地生成；数据未上传。`, "");
+  lines.push("", `> 由 [Smart Tabular Analyzer](https://github.com/wy-data-30/smart-tabular-analyzer) ${escapeMarkdownText(reportData.version)} 在浏览器本地生成；数据未上传。`, "");
   return lines.join("\n");
 }
 

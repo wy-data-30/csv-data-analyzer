@@ -7,8 +7,8 @@ const state = {
   duplicateRows: 0,
   totalMissing: 0,
   parseWarnings: [],
-  typeOverrides: {},
-  fieldTypeDrafts: {},
+  typeOverrides: Object.create(null),
+  fieldTypeDrafts: Object.create(null),
   pendingExcel: null,
   activeImportId: 0,
   charts: {},
@@ -464,10 +464,15 @@ function buildExcelTabularData(formattedRows, rawRows, sheetName = "当前工作
   const rows = dataPairs
     .filter((pair) => usedColumnIndexes.some((columnIndex) => !isMissing(pair.formatted[columnIndex]) || !isMissing(pair.raw[columnIndex])))
     .map((pair) => fields.reduce((row, field, fieldIndex) => {
-      const value = pair.formatted[usedColumnIndexes[fieldIndex]];
+      const columnIndex = usedColumnIndexes[fieldIndex];
+      const rawValue = pair.raw[columnIndex];
+      const normalizedDateValue = isDateObject(rawValue)
+        ? normalizeExcelDateValue(rawValue)
+        : null;
+      const value = normalizedDateValue ?? pair.formatted[columnIndex];
       row[field] = value === null || value === undefined ? "" : String(value);
       return row;
-    }, {}));
+    }, Object.create(null)));
 
   if (!rows.length) {
     throw new Error(`工作表「${sheetName}」只有表头，没有可分析的数据行。`);
@@ -478,6 +483,11 @@ function buildExcelTabularData(formattedRows, rawRows, sheetName = "当前工作
 
 function excelRowHasValue(row) {
   return Array.isArray(row) && row.some((value) => !isMissing(value));
+}
+
+function normalizeExcelDateValue(value) {
+  const date = toDate(value);
+  return date ? date.toISOString().slice(0, 10) : null;
 }
 
 function validateExcelFileSignature(buffer, fileName) {
@@ -509,9 +519,28 @@ function parseCsvText(text, sourceName, importId = beginImport()) {
   Papa.parse(text, {
     header: true,
     skipEmptyLines: true,
+    transformHeader: encodeCsvHeaderForParser,
     complete: (results) => handleParsedData(results, sourceName, importId),
     error: (error) => showError(error.message, importId)
   });
+}
+
+const CSV_HEADER_KEY_PREFIX = "__SMART_CSV_HEADER__";
+
+function encodeCsvHeaderForParser(header, index) {
+  return `${CSV_HEADER_KEY_PREFIX}${index}:${encodeURIComponent(String(header ?? ""))}`;
+}
+
+function decodeCsvHeaderFromParser(header) {
+  const value = String(header ?? "");
+  if (!value.startsWith(CSV_HEADER_KEY_PREFIX)) return value;
+  const separatorIndex = value.indexOf(":", CSV_HEADER_KEY_PREFIX.length);
+  if (separatorIndex < 0) return value;
+  try {
+    return decodeURIComponent(value.slice(separatorIndex + 1));
+  } catch {
+    return value;
+  }
 }
 
 function beginImport() {
@@ -605,7 +634,7 @@ function handleParsedData(results, sourceName, importId) {
 
   const allFieldPairs = (results.meta?.fields || []).map((rawField) => ({
     raw: rawField,
-    clean: normalizeFieldName(rawField)
+    clean: normalizeFieldName(decodeCsvHeaderFromParser(rawField))
   }));
   const fieldPairs = allFieldPairs.filter((pair) => pair.clean !== "");
   const fields = fieldPairs.map((pair) => pair.clean);
@@ -668,7 +697,7 @@ function commitTabularData(fields, rows, sourceName, importId, parseWarnings = [
   state.insights = [];
   state.customAnalysis = null;
   state.profiles = fields.map((field) => buildColumnProfile(field, rows));
-  state.typeOverrides = {};
+  state.typeOverrides = Object.create(null);
   state.fieldTypeDrafts = Object.fromEntries(
     state.profiles.map((profile) => [profile.field, profile.inferredTypeKey])
   );
@@ -1038,7 +1067,7 @@ function updateSchemaDraftRow(field, typeKey) {
 
 function applyFieldConfiguration() {
   if (!state.rows.length) return;
-  state.typeOverrides = {};
+  state.typeOverrides = Object.create(null);
   state.profiles.forEach((profile) => {
     const typeKey = getDraftTypeKey(profile);
     profile.typeKey = typeKey;
@@ -1059,7 +1088,7 @@ function applyFieldConfiguration() {
 
 function restoreAutomaticFieldTypes() {
   if (!state.rows.length) return;
-  state.typeOverrides = {};
+  state.typeOverrides = Object.create(null);
   state.profiles.forEach((profile) => {
     profile.typeKey = profile.inferredTypeKey;
     profile.type = profile.inferredType;
@@ -2005,15 +2034,18 @@ function groupMetricRowsByField(metricRows, groupField) {
 
 function summarizeGroupedValues(groups) {
   return Array.from(groups.entries())
-    .map(([name, values]) => ({
-      name,
-      count: values.length,
-      sum: values.reduce((total, value) => total + value, 0),
-      avg: mean(values),
-      median: median(values),
-      min: Math.min(...values),
-      max: Math.max(...values)
-    }))
+    .map(([name, values]) => {
+      const { min, max } = numericExtents(values);
+      return {
+        name,
+        count: values.length,
+        sum: values.reduce((total, value) => total + value, 0),
+        avg: mean(values),
+        median: median(values),
+        min,
+        max
+      };
+    })
     .sort((a, b) => b.sum - a.sum);
 }
 
@@ -2063,11 +2095,12 @@ function summarizeNumbers(values) {
   if (!values.length) {
     return { mean: 0, median: 0, min: 0, max: 0, std: 0 };
   }
+  const { min, max } = numericExtents(values);
   return {
     mean: mean(values),
     median: median(values),
-    min: Math.min(...values),
-    max: Math.max(...values),
+    min,
+    max,
     std: standardDeviation(values)
   };
 }
@@ -2204,8 +2237,11 @@ function buildTrendInsight(dateField) {
   }
   const first = trend.values[0];
   const last = trend.values[trend.values.length - 1];
-  const change = first === 0 ? 0 : (last - first) / Math.abs(first);
   const direction = last > first ? "上升" : last < first ? "下降" : "基本持平";
+  if (first === 0 && last !== 0) {
+    return `基于日期字段「${dateField}」观察，${trend.label} 从 ${trend.labels[0]} 到 ${trend.labels[trend.labels.length - 1]} 呈${direction}变化；由于首期值为 0，百分比变化无法计算，绝对变化为 ${formatFieldNumber(numericField || "", Math.abs(last - first))}。`;
+  }
+  const change = first === 0 ? 0 : (last - first) / Math.abs(first);
   return `基于日期字段「${dateField}」观察，${trend.label} 从 ${trend.labels[0]} 到 ${trend.labels[trend.labels.length - 1]} 呈${direction}变化，变化幅度约 ${formatPercent(Math.abs(change))}。`;
 }
 
@@ -2276,8 +2312,7 @@ function aggregateByCategory(metricField, groupField, method) {
 
 function buildHistogram(values, binCount, field = "") {
   if (!values.length) return [];
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  const { min, max } = numericExtents(values);
   if (min === max) return [{ label: formatFieldNumber(field, min), count: values.length }];
   const width = (max - min) / binCount;
   const bins = Array.from({ length: binCount }, (_, index) => {
@@ -2365,8 +2400,8 @@ function resetAnalysisState() {
   state.duplicateRows = 0;
   state.totalMissing = 0;
   state.parseWarnings = [];
-  state.typeOverrides = {};
-  state.fieldTypeDrafts = {};
+  state.typeOverrides = Object.create(null);
+  state.fieldTypeDrafts = Object.create(null);
   state.pendingExcel = null;
   state.sourceFileName = "";
   state.sourceSheetName = "";
@@ -2516,7 +2551,7 @@ function normalizeParsedRow(row, fieldPairs) {
       ? row[pair.raw]
       : row[pair.clean];
     return normalized;
-  }, {});
+  }, Object.create(null));
 }
 
 function isMissing(value) {
@@ -2534,8 +2569,8 @@ function displayValue(value) {
 function isIdFieldName(field) {
   const name = String(field || "").trim();
   return /(^|[_\-\s])(id|uuid|guid|code|key|number|no)([_\-\s]|$)/i.test(name)
-    || /(id|uuid|guid|code|key|number|no)$/i.test(name)
-    || /[a-z](Id|ID)$/.test(name)
+    || /[a-z0-9](?:Id|ID|Uuid|UUID|Guid|GUID|Code|CODE|Key|KEY|Number|NUMBER|No|NO)$/.test(name)
+    || /^(?:user|customer|order|product|account|session|event|device|student|employee|member|record)(?:id|uuid|guid|code|key|number|no)$/i.test(name)
     || /编号|编码|代码|订单号|账号|工号|主键|用户ID|事件ID|会话ID/i.test(name)
     || /(?:学号|学籍号|考生号|准考证号|身份证号|身份证号码|证件号|手机号|手机号码|流水号|序列号|设备号|会员号|合同号|票据号|批次号|档案号)(?:$|[_\-\s（(])/i.test(name);
 }
@@ -2744,6 +2779,17 @@ function formatInteger(value) {
 function formatPercent(value) {
   if (!Number.isFinite(value)) return "0%";
   return `${(value * 100).toFixed(1)}%`;
+}
+
+function numericExtents(values) {
+  if (!values.length) return { min: 0, max: 0 };
+  let min = Infinity;
+  let max = -Infinity;
+  values.forEach((value) => {
+    if (value < min) min = value;
+    if (value > max) max = value;
+  });
+  return { min, max };
 }
 
 function getNumericFormat(field) {

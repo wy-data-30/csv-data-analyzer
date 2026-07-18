@@ -57,6 +57,10 @@ CSV 文件经常来自不同系统或业务场景，字段结构并不固定。S
 ├── index.html
 ├── style.css
 ├── script.js
+├── assets/
+├── tests/
+│   ├── core.test.cjs
+│   └── fixtures/
 ├── sample-data.csv
 ├── sample-sales.csv
 ├── sample-students.csv
@@ -67,16 +71,6 @@ CSV 文件经常来自不同系统或业务场景，字段结构并不固定。S
 ├── README.md
 └── README.zh-CN.md
 ```
-
-## 项目截图
-
-### 首页
-
-![Smart CSV Analyzer 首页](./assets/homepage.png.png)
-
-### 分析结果
-
-![Smart CSV Analyzer 分析结果](<./assets/屏幕截图 2026-07-08 164952.png>)
 
 ## 本地运行
 
@@ -95,6 +89,14 @@ http://localhost:8000
 ```
 
 使用本地静态服务可以避免部分浏览器限制本地文件 `fetch()`，从而影响“加载示例数据”按钮读取 `sample-data.csv`。
+
+## 运行测试
+
+核心回归测试需要 Node.js。请在项目根目录运行：
+
+```bash
+node tests/core.test.cjs
+```
 
 ## 使用方法
 
@@ -190,7 +192,7 @@ HTML 报告会把当前页面已生成的图表和报告展示样式嵌入下载
 - 增加箱线图、散点图、堆叠柱状图等更多图表类型。
 - 支持筛选、排序、字段重命名、派生字段和简单数据清洗。
 - 支持保存和加载分析配置。
-- 拆分核心分析逻辑并补充自动化测试。
+- 继续拆分核心分析逻辑，并扩充自动化回归测试覆盖。
 
 ## License
 

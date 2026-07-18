@@ -54,6 +54,11 @@ vm.runInContext(source, context, { filename: "script.js" });
 const projectRoot = path.join(__dirname, "..");
 const htmlSource = fs.readFileSync(path.join(projectRoot, "index.html"), "utf8");
 const styleSource = fs.readFileSync(path.join(projectRoot, "style.css"), "utf8");
+assert.match(
+  htmlSource,
+  /https:\/\/cdn\.sheetjs\.com\/xlsx-0\.20\.3\/package\/dist\/xlsx\.full\.min\.js/
+);
+assert.doesNotMatch(htmlSource, /xlsx@0\.18\.5|xlsx-0\.18\.5/);
 const definedCssVariables = new Set(
   [...styleSource.matchAll(/--([\w-]+)\s*:/g)].map((match) => match[1])
 );
@@ -92,6 +97,7 @@ const gbkCsvBytes = [
   0xd0, 0xd5, 0xc3, 0xfb, 0x2c, 0xb3, 0xc7, 0xca, 0xd0, 0x0a,
   0xd5, 0xc5, 0xc8, 0xfd, 0x2c, 0xc9, 0xcf, 0xba, 0xa3
 ];
+const gb18030OnlyBytes = [0x95, 0x34, 0xb2, 0x35];
 
 assert.equal(
   evaluate(`decodeCsvBuffer(new Uint8Array(${JSON.stringify(utf8CsvBytes)}).buffer, "utf-8").text`),
@@ -108,6 +114,14 @@ assert.equal(
 assert.equal(
   evaluate(`decodeCsvBuffer(new Uint8Array(${JSON.stringify(gbkCsvBytes)}).buffer, "auto").text`),
   utf8CsvText
+);
+assert.equal(
+  evaluate(`decodeCsvBuffer(new Uint8Array(${JSON.stringify(gb18030OnlyBytes)}).buffer, "gb18030").text`),
+  "𠮷"
+);
+assert.equal(
+  evaluate(`decodeCsvBuffer(new Uint8Array(${JSON.stringify(gb18030OnlyBytes)}).buffer, "auto").text`),
+  "𠮷"
 );
 
 assert.equal(evaluate('toNumber("10%")'), 0.1);
@@ -205,6 +219,18 @@ assert.equal(evaluate('formatFieldNumber("转化率", 0.3375)'), "33.75%");
 assert.equal(evaluate('formatFieldNumber("价格", 1234.5)'), "1,234.5");
 assert.equal(evaluate('chartOptions("平均值", "转化率").scales.y.ticks.callback(0.1)'), "10%");
 
+context.__largeValues = Array.from({ length: 125_000 }, (_, index) => index - 62_500);
+assert.equal(evaluate("summarizeNumbers(__largeValues).min"), -62_500);
+assert.equal(evaluate("summarizeNumbers(__largeValues).max"), 62_499);
+assert.equal(
+  evaluate("buildHistogram(__largeValues, 10).reduce((total, bin) => total + bin.count, 0)"),
+  125_000
+);
+assert.equal(
+  evaluate('summarizeGroupedValues(new Map([["全部", __largeValues]]))[0].max'),
+  62_499
+);
+
 assert.equal(evaluate('countConversionFailuresForValues(["0", "bad", "", null], "numeric")'), 1);
 assert.equal(evaluate('countConversionFailuresForValues(["2026-01-01", "not-a-date", " "], "date")'), 1);
 assert.equal(evaluate('countConversionFailuresForValues(["任意文本"], "category")'), 0);
@@ -221,6 +247,36 @@ assert.deepEqual(JSON.parse(excelData), {
     { 订单编号: "A-002", 地区: "华南", 销售额: "980" }
   ]
 });
+
+const excelRawDateResult = JSON.parse(evaluate(`JSON.stringify((() => {
+  const data = buildExcelTabularData(
+    [["日期"], ["7/17/26"]],
+    [["日期"], [new Date(Date.UTC(2026, 6, 17))]],
+    "日期表"
+  );
+  return {
+    type: buildColumnProfile("日期", data.rows).typeKey,
+    iso: toDate(data.rows[0]["日期"]).toISOString()
+  };
+})())`));
+assert.deepEqual(excelRawDateResult, {
+  type: "date",
+  iso: "2026-07-17T00:00:00.000Z"
+});
+
+const excelProtoResult = JSON.parse(evaluate(`JSON.stringify((() => {
+  const data = buildExcelTabularData(
+    [["__proto__"], ["excel-value"]],
+    [["__proto__"], ["excel-value"]],
+    "特殊表头"
+  );
+  const row = data.rows[0];
+  return {
+    own: Object.prototype.hasOwnProperty.call(row, "__proto__"),
+    value: row["__proto__"]
+  };
+})())`));
+assert.deepEqual(excelProtoResult, { own: true, value: "excel-value" });
 
 function excelError(formattedRows, rawRows, sheetName = "测试表") {
   return evaluate(`(() => {
@@ -257,6 +313,44 @@ assert.equal(
   evaluate('buildColumnProfile("用户ID", [{"用户ID":"u1"},{"用户ID":"u1"},{"用户ID":"u2"}]).typeKey'),
   "id"
 );
+for (const field of ["paid", "valid", "grid", "PAID", "VALID", "GRID"]) {
+  assert.equal(evaluate(`isIdFieldName(${JSON.stringify(field)})`), false);
+}
+for (const field of ["id", "user_id", "userId", "orderID", "orderid", "customerCode"]) {
+  assert.equal(evaluate(`isIdFieldName(${JSON.stringify(field)})`), true);
+}
+
+const encodedProtoHeader = evaluate('encodeCsvHeaderForParser("__proto__", 0)');
+const encodedNormalHeader = evaluate('encodeCsvHeaderForParser("普通字段", 1)');
+context.__encodedProtoHeader = encodedProtoHeader;
+context.__encodedNormalHeader = encodedNormalHeader;
+context.__safeProtoCsvRow = {
+  [encodedProtoHeader]: "csv-value",
+  [encodedNormalHeader]: "normal-value"
+};
+const csvProtoResult = JSON.parse(evaluate(`JSON.stringify((() => {
+  const importId = beginImport();
+  handleParsedData({
+    errors: [],
+    meta: { fields: [__encodedProtoHeader, __encodedNormalHeader] },
+    data: [__safeProtoCsvRow]
+  }, "special-header.csv", importId);
+  const row = state.rows[0];
+  return {
+    fields: state.fields,
+    own: Object.prototype.hasOwnProperty.call(row, "__proto__"),
+    value: row["__proto__"],
+    normal: row["普通字段"],
+    typeOverrideKeys: Object.keys(state.typeOverrides)
+  };
+})())`));
+assert.deepEqual(csvProtoResult, {
+  fields: ["__proto__", "普通字段"],
+  own: true,
+  value: "csv-value",
+  normal: "normal-value",
+  typeOverrideKeys: []
+});
 
 const firstImport = evaluate("beginImport()");
 const secondImport = evaluate("beginImport()");
@@ -388,6 +482,34 @@ assert.equal(evaluate("state.numericStats.length"), 0);
 assert.equal(evaluate('buildTemplateFieldOptions({required:true, expected:"numeric"}).includes("渠道")'), false);
 assert.equal(evaluate('JSON.stringify(buildDateTrend("下单日期", "渠道").labels)'), "[]");
 evaluate("restoreAutomaticFieldTypes()");
+
+const zeroBaselineInsight = evaluate(`(() => {
+  state.rows = [
+    { date: "2026-01-01", metric: "0" },
+    { date: "2026-01-02", metric: "10" }
+  ];
+  state.fields = ["date", "metric"];
+  state.profiles = state.fields.map((field) => buildColumnProfile(field, state.rows));
+  return buildTrendInsight("date");
+})()`);
+assert.match(zeroBaselineInsight, /上升/);
+assert.match(zeroBaselineInsight, /首期值为 0/);
+assert.match(zeroBaselineInsight, /百分比变化无法计算/);
+assert.match(zeroBaselineInsight, /绝对变化为 10/);
+assert.doesNotMatch(zeroBaselineInsight, /变化幅度约 0(?:\.0)?%/);
+
+const negativeZeroBaselineInsight = evaluate(`(() => {
+  state.rows = [
+    { date: "2026-01-01", metric: "0" },
+    { date: "2026-01-02", metric: "-10" }
+  ];
+  state.fields = ["date", "metric"];
+  state.profiles = state.fields.map((field) => buildColumnProfile(field, state.rows));
+  return buildTrendInsight("date");
+})()`);
+assert.match(negativeZeroBaselineInsight, /下降/);
+assert.match(negativeZeroBaselineInsight, /绝对变化为 10/);
+assert.doesNotMatch(negativeZeroBaselineInsight, /绝对变化为 -10/);
 
 // V2.3 report export: build a serializable report model that is shared by
 // both exporters. Keep these tests DOM-independent so empty analytical

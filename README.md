@@ -51,24 +51,20 @@ External libraries are loaded through CDN links in `index.html`.
 ├── index.html
 ├── style.css
 ├── script.js
+├── assets/
+├── tests/
+│   ├── core.test.cjs
+│   └── fixtures/
 ├── sample-data.csv
 ├── sample-sales.csv
 ├── sample-students.csv
 ├── sample-used-products.csv
 ├── sample-survey.csv
 ├── sample-user-behavior.csv
-└── README.md
+├── LICENSE
+├── README.md
+└── README.zh-CN.md
 ```
-
-## Screenshots
-
-### Home Page
-
-![Smart CSV Analyzer home page](./assets/homepage.png.png)
-
-### Analysis Results
-
-![Smart CSV Analyzer analysis results](<./assets/屏幕截图 2026-07-08 164952.png>)
 
 ## Getting Started
 
@@ -87,6 +83,14 @@ http://localhost:8000
 ```
 
 Using a local static server is recommended because some browsers restrict `fetch()` when opening files directly from the local filesystem. This can affect the "Load Sample Data" button.
+
+## Running Tests
+
+The core regression suite requires Node.js. Run it from the project root:
+
+```bash
+node tests/core.test.cjs
+```
 
 ## Usage
 
@@ -221,7 +225,7 @@ The page loads PapaParse, Chart.js, and SheetJS from CDN providers. When the pag
 - Add more chart types such as box plots, scatter plots, and stacked bar charts.
 - Support filtering, sorting, renaming fields, derived fields, and simple data cleaning operations.
 - Add saved analysis configurations.
-- Split core analysis logic into smaller modules and add automated tests.
+- Continue splitting core analysis logic into smaller modules and expand automated regression coverage.
 
 ## License
 

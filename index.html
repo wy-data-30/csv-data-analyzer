@@ -159,7 +159,8 @@
           <a href="#chartsSection"><span>06</span>图表分析</a>
           <a href="#customSection"><span>07</span>自定义分析</a>
           <a href="#insightsSection"><span>08</span>分析结论</a>
-          <a href="#reportSection"><span>09</span>报告导出</a>
+          <a href="#dataExportSection"><span>09</span>导出数据</a>
+          <a href="#reportSection"><span>10</span>报告导出</a>
         </nav>
       </aside>
 
@@ -482,6 +483,49 @@
           </div>
         </div>
         <div id="insights" class="insights"></div>
+      </section>
+
+      <section id="dataExportSection" class="section-block">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">数据导出</p>
+            <h2>保存处理后的数据</h2>
+          </div>
+        </div>
+        <p class="section-note">导出过程仅在浏览器本地完成。下载文件使用 UTF-8 BOM，并保留原始字段顺序；不会修改或覆盖原始文件。</p>
+
+        <div class="filter-count-grid" aria-label="数据导出记录统计">
+          <div class="filter-count-item">
+            <span>原始行数</span>
+            <strong id="dataExportOriginalCount">0</strong>
+          </div>
+          <div class="filter-count-item current">
+            <span>筛选后行数</span>
+            <strong id="dataExportFilteredCount">0</strong>
+          </div>
+          <div class="filter-count-item">
+            <span>去重后行数</span>
+            <strong id="dataExportDeduplicatedCount">0</strong>
+          </div>
+        </div>
+
+        <div class="data-export-options">
+          <div class="data-export-option">
+            <div>
+              <h3>当前筛选结果</h3>
+              <p>导出当前分析范围内的全部记录；没有筛选条件时导出全部原始记录。</p>
+            </div>
+            <button id="exportFilteredCsv" type="button" disabled>导出筛选后 CSV</button>
+          </div>
+          <div class="data-export-option">
+            <div>
+              <h3>原始数据去重结果</h3>
+              <p>按全部原始字段识别完全重复行，保留每组重复记录中首次出现的一行。</p>
+            </div>
+            <button id="exportDeduplicatedCsv" class="secondary-button" type="button" disabled>导出去重后 CSV</button>
+          </div>
+        </div>
+        <p id="dataExportStatus" class="inline-status" aria-live="polite"></p>
       </section>
 
       <section id="reportSection" class="section-block report-section">

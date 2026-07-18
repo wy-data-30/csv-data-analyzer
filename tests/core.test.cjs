@@ -44,6 +44,7 @@ const mobile640Start = styleSource.indexOf("@media (max-width: 640px)");
 const mobile640End = styleSource.indexOf("@media (max-width: 390px)", mobile640Start);
 const mobile640Source = styleSource.slice(mobile640Start, mobile640End);
 assert.match(mobile640Source, /\.report-actions\s*\{[^}]*grid-template-columns:\s*1fr;/s);
+assert.match(mobile640Source, /\.data-export-option\s*\{[^}]*grid-template-columns:\s*1fr;/s);
 assert.match(styleSource, /\.frequency-row\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+auto;/s);
 assert.match(styleSource, /\.results-nav\s*\{[^}]*position:\s*sticky;/s);
 assert.match(mobile640Source, /\.results-nav\s*\{[^}]*position:\s*static;/s);

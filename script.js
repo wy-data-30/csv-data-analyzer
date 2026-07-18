@@ -106,6 +106,12 @@ const dom = {
   templateSecondaryChartTitle: document.getElementById("templateSecondaryChartTitle"),
   templateTrendCard: document.getElementById("templateTrendCard"),
   templateTrendChartTitle: document.getElementById("templateTrendChartTitle"),
+  dataExportOriginalCount: document.getElementById("dataExportOriginalCount"),
+  dataExportFilteredCount: document.getElementById("dataExportFilteredCount"),
+  dataExportDeduplicatedCount: document.getElementById("dataExportDeduplicatedCount"),
+  exportFilteredCsv: document.getElementById("exportFilteredCsv"),
+  exportDeduplicatedCsv: document.getElementById("exportDeduplicatedCsv"),
+  dataExportStatus: document.getElementById("dataExportStatus"),
   exportHtmlReport: document.getElementById("exportHtmlReport"),
   exportMarkdownReport: document.getElementById("exportMarkdownReport"),
   reportExportStatus: document.getElementById("reportExportStatus"),
@@ -275,6 +281,8 @@ dom.scenarioTemplate.addEventListener("change", () => {
 });
 
 dom.runTemplateAnalysis.addEventListener("click", runTemplateAnalysis);
+dom.exportFilteredCsv.addEventListener("click", () => exportProcessedCsv("filtered"));
+dom.exportDeduplicatedCsv.addEventListener("click", () => exportProcessedCsv("deduplicated"));
 dom.exportHtmlReport.addEventListener("click", exportHtmlReport);
 dom.exportMarkdownReport.addEventListener("click", exportMarkdownReport);
 dom.confirmSheetSelection.addEventListener("click", analyzeSelectedExcelSheet);
@@ -1590,6 +1598,7 @@ function refreshFilteredAnalysis() {
     state.customAnalysis && !dom.v2AnalysisResults.classList.contains("hidden")
   );
   const rerunTemplateAnalysis = !dom.templateResults.classList.contains("hidden");
+  setDataExportStatus("");
   state.analysisCompletedAt = null;
   updateExportButtons();
   state.numericStats = buildNumericStats(getAnalysisRows());
@@ -1612,6 +1621,7 @@ function rebuildAnalysisFromProfiles(fieldConfigMessage = "字段配置已更新
   state.analysisCompletedAt = null;
   updateExportButtons();
   resetFilterState();
+  setDataExportStatus("");
   state.numericStats = buildNumericStats(getAnalysisRows());
   state.qualityNumericStats = buildNumericStats(state.rows);
   state.categoryStats = buildCategoryStats(getAnalysisRows());
@@ -2908,6 +2918,7 @@ function resetAnalysisState() {
   state.categoryFilterDraftValues = new Set();
 
   document.body.classList.remove("has-results");
+  setDataExportStatus("");
   setReportExportStatus("");
 
   dom.sourceName.textContent = "";
@@ -2981,6 +2992,16 @@ function countDuplicateRows(rows, fields) {
     else seen.add(key);
   });
   return duplicates;
+}
+
+function deduplicateRows(rows, fields) {
+  const seen = new Set();
+  return rows.filter((row) => {
+    const key = JSON.stringify(fields.map((field) => normalizeValue(row[field])));
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function countValues(field, rows = getAnalysisRows()) {
@@ -3353,13 +3374,73 @@ function canExportReport() {
   );
 }
 
+function canExportProcessedData() {
+  return Boolean(state.rows.length && state.fields.length);
+}
+
 function updateExportButtons() {
   const disabled = !canExportReport();
   [dom.exportHtmlReport, dom.exportMarkdownReport].filter(Boolean).forEach((button) => {
     button.disabled = disabled;
     button.setAttribute("aria-disabled", String(disabled));
   });
+  const dataExportDisabled = !canExportProcessedData();
+  [dom.exportFilteredCsv, dom.exportDeduplicatedCsv].filter(Boolean).forEach((button) => {
+    button.disabled = dataExportDisabled;
+    button.setAttribute("aria-disabled", String(dataExportDisabled));
+  });
+  renderDataExportSummary();
   updateWorkflowSteps();
+}
+
+function renderDataExportSummary() {
+  const originalCount = state.rows.length;
+  const filteredCount = getAnalysisRows().length;
+  const deduplicatedCount = Math.max(0, originalCount - state.duplicateRows);
+  dom.dataExportOriginalCount.textContent = formatInteger(originalCount);
+  dom.dataExportFilteredCount.textContent = formatInteger(filteredCount);
+  dom.dataExportDeduplicatedCount.textContent = formatInteger(deduplicatedCount);
+}
+
+function exportProcessedCsv(mode) {
+  if (!canExportProcessedData()) {
+    setDataExportStatus("请先上传并解析有效的数据文件。", "warning");
+    return;
+  }
+
+  try {
+    const rows = getProcessedExportRows(mode);
+    const exportedAt = new Date();
+    const content = buildCsvExportContent(rows, state.fields);
+    const fileName = buildDataExportFileName(mode, exportedAt);
+    downloadUtf8TextFile(content, fileName, "text/csv;charset=utf-8");
+    const exportLabel = mode === "deduplicated" ? "去重后数据" : "筛选后数据";
+    setDataExportStatus(`已导出${exportLabel} ${formatInteger(rows.length)} 行：${fileName}`, "success");
+  } catch (error) {
+    setDataExportStatus(`数据导出失败：${error.message}`, "error");
+  }
+}
+
+function getProcessedExportRows(mode) {
+  if (mode === "filtered") return getAnalysisRows();
+  if (mode === "deduplicated") return deduplicateRows(state.rows, state.fields);
+  throw new Error("不支持的数据导出类型。");
+}
+
+function buildCsvExportContent(rows, fields) {
+  if (!window.Papa || typeof window.Papa.unparse !== "function") {
+    throw new Error("CSV 导出组件未加载，请检查网络连接后刷新页面重试。");
+  }
+  const orderedFields = [...fields];
+  const data = rows.map((row) => orderedFields.map((field) => (
+    Object.prototype.hasOwnProperty.call(row, field) && row[field] !== null && row[field] !== undefined
+      ? row[field]
+      : ""
+  )));
+  return window.Papa.unparse(
+    { fields: orderedFields, data },
+    { header: true, newline: "\r\n", skipEmptyLines: false }
+  );
 }
 
 function exportHtmlReport() {
@@ -3403,7 +3484,7 @@ function exportAnalysisReport(format) {
     const mimeType = format === "html"
       ? "text/html;charset=utf-8"
       : "text/markdown;charset=utf-8";
-    downloadReportFile(content, fileName, mimeType);
+    downloadUtf8TextFile(content, fileName, mimeType);
     setStatus(`${format === "html" ? "HTML" : "Markdown"} 报告已生成：${fileName}`, "success");
     setReportExportStatus(`报告已生成：${fileName}`, "success");
   } catch (error) {
@@ -3417,8 +3498,12 @@ function exportAnalysisReport(format) {
   }
 }
 
-function downloadReportFile(content, fileName, mimeType) {
-  const blob = new Blob(["\uFEFF", content], { type: mimeType });
+function createUtf8BomBlob(content, mimeType) {
+  return new Blob(["\uFEFF", content], { type: mimeType });
+}
+
+function downloadUtf8TextFile(content, fileName, mimeType) {
+  const blob = createUtf8BomBlob(content, mimeType);
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -4070,6 +4155,13 @@ function buildReportFileName(extension, now = new Date()) {
   return `${sanitizeFileName(stem)}-${formatReportFileTimestamp(now)}.${safeExtension}`;
 }
 
+function buildDataExportFileName(mode, now = new Date()) {
+  const suffix = mode === "deduplicated" ? "deduplicated" : "filtered";
+  const originalName = getReportSourceFileName().split(/[\\/]/).pop() || "data";
+  const stem = originalName.replace(/\.(?:csv|xlsx|xls)$/i, "") || "data";
+  return `${sanitizeFileName(stem)}_${suffix}_${formatReportFileDate(now)}.csv`;
+}
+
 function normalizeReportDate(value, fallback = new Date()) {
   const parsed = value instanceof Date ? new Date(value.getTime()) : value ? new Date(value) : null;
   if (parsed && !Number.isNaN(parsed.getTime())) return parsed;
@@ -4085,6 +4177,11 @@ function formatReportDateTime(value) {
 function formatReportFileTimestamp(value) {
   const date = normalizeReportDate(value);
   return `${date.getFullYear()}${padReportNumber(date.getMonth() + 1)}${padReportNumber(date.getDate())}-${padReportNumber(date.getHours())}${padReportNumber(date.getMinutes())}${padReportNumber(date.getSeconds())}`;
+}
+
+function formatReportFileDate(value) {
+  const date = normalizeReportDate(value);
+  return `${date.getFullYear()}${padReportNumber(date.getMonth() + 1)}${padReportNumber(date.getDate())}`;
 }
 
 function padReportNumber(value) {
@@ -4131,4 +4228,10 @@ function setReportExportStatus(message, tone = "") {
   if (!dom.reportExportStatus) return;
   dom.reportExportStatus.className = `inline-status${tone ? ` ${tone}` : ""}`;
   dom.reportExportStatus.textContent = message;
+}
+
+function setDataExportStatus(message, tone = "") {
+  if (!dom.dataExportStatus) return;
+  dom.dataExportStatus.className = `inline-status${tone ? ` ${tone}` : ""}`;
+  dom.dataExportStatus.textContent = message;
 }

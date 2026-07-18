@@ -28,6 +28,7 @@ The project is built as a static website and does not require a backend service,
 - Report non-empty values that cannot be safely converted to the selected numeric or date type, while continuing with valid values.
 - Restore all fields to automatic detection at any time.
 - Generate a dataset overview, including row count, field count, field type counts, missing values, and duplicate rows.
+- Filter the current analysis by multiple categorical values, a numeric range, and an optional date range at the same time, without modifying the imported rows.
 - Produce data quality reports for missing values, missing rates, duplicate rows, and numeric outliers.
 - Calculate descriptive statistics for numeric fields, including mean, median, minimum, maximum, and standard deviation. Columns consistently written with `%` keep decimal values internally but are displayed as percentages in statistics and charts.
 - Generate frequency statistics for categorical fields, including Top 10 categories and proportions.
@@ -35,6 +36,7 @@ The project is built as a static website and does not require a backend service,
 - Support custom analysis by selecting a numeric metric, a categorical grouping field, and an optional date field.
 - Provide scenario templates for general data, sales data, student scores, used product prices, surveys, and user behavior logs.
 - Generate cautious, data-based insights without assuming external business context.
+- Export the current filtered rows or the original dataset with complete duplicate rows removed as CSV. Data exports preserve the original field order and include a UTF-8 BOM for Excel compatibility.
 - Export the completed analysis as an HTML or Markdown report. Both formats include source metadata, field types, data quality, statistics, trends, custom grouping results, and automatic insights.
 - Preserve the currently rendered charts inside a self-contained HTML report that can be opened offline.
 - Support responsive layouts for desktop and mobile screens.
@@ -107,7 +109,7 @@ You can also run the original full regression script directly:
 node tests/core.test.cjs
 ```
 
-The suite covers CSV encoding and normalized parsing, Excel worksheet conversion, Chinese fields, field type inference, missing values, duplicate rows, descriptive statistics, categorical frequencies, IQR outliers, empty input, single-column data, and datasets without numeric or categorical fields.
+The suite covers CSV encoding and normalized parsing, Excel worksheet conversion, Chinese fields, field type inference, missing values, duplicate rows, combined filtering, processed CSV export, UTF-8 BOM output, descriptive statistics, categorical frequencies, IQR outliers, empty input, single-column data, and datasets without numeric or categorical fields.
 
 ## Usage
 
@@ -119,8 +121,10 @@ The suite covers CSV encoding and normalized parsing, Excel worksheet conversion
 6. Check the conversion failure count. Invalid non-empty numeric or date values are skipped from the corresponding analysis instead of stopping the import.
 7. Use **Restore automatic detection** to discard manual type corrections and rebuild the analysis from the inferred types.
 8. Review the generated data overview, quality report, statistics, charts, and insights.
-9. Use the field selectors or a scenario template for custom analysis.
-10. After analysis finishes, use **Export HTML report** or **Export Markdown report** in the report navigation. The export controls remain disabled until a valid analysis is available.
+9. Optionally apply categorical, numeric, and date filters to define the current analysis range.
+10. In **Export Data**, download either the current filtered rows or the original dataset with complete duplicate rows removed.
+11. Use the field selectors or a scenario template for custom analysis.
+12. After analysis finishes, use **Export HTML report** or **Export Markdown report** in the report navigation. The report export controls remain disabled until a valid analysis is available.
 
 The application does not require fixed column names. Template analysis is based on the fields selected by the user.
 
@@ -187,6 +191,17 @@ Field detection is heuristic. Users can correct inferred types in the field conf
 - Custom grouping chart: groups a selected numeric metric by a selected categorical field.
 - Scenario template charts: render a primary chart, secondary chart, and optional trend chart based on the selected template and field mapping.
 
+## Processed Data Export
+
+The **Export Data** section provides two browser-local CSV downloads:
+
+- **Filtered CSV:** exports the current `filteredRows` result. When no filter is active, it contains all imported rows.
+- **Deduplicated CSV:** removes complete duplicate rows from the original imported dataset across all original fields and retains the first occurrence of each row. This export is independent of the current filters.
+
+Both exports preserve the original column order and cell values. Files are generated with comma delimiters, CRLF line endings, and a UTF-8 BOM so that Chinese headers and values open correctly in Excel and WPS. File names follow `original_filtered_YYYYMMDD.csv` or `original_deduplicated_YYYYMMDD.csv`, for example `sales_filtered_20260718.csv`.
+
+Exporting creates a new browser download. It does not modify or overwrite the uploaded CSV or Excel file, and no source rows are sent to a server.
+
 ## Report Export
 
 V2.3 can download the current analysis as either a standalone HTML file or a Markdown file. Report generation and download happen entirely in the browser; source rows and report contents are never uploaded.
@@ -213,13 +228,14 @@ Downloaded files use the original file base name plus the local export date and 
 - No fixed business schema; CSV files with different structures can be analyzed through automatic detection and manual field mapping.
 - Privacy-friendly processing because uploaded files are parsed locally in the browser.
 - Practical coverage of the common CSV exploration workflow: preview, schema detection, quality checks, statistics, visualization, and insights.
+- Browser-local export of filtered or deduplicated rows with Excel-compatible UTF-8 CSV encoding.
 - Built-in scenario templates for common structured datasets.
 - Responsive interface with scrollable tables and adaptive chart layouts.
 - Supports Chinese field names and values in CSV and Excel files.
 
 ## Privacy
 
-All CSV and Excel parsing, analysis, and report export run locally in the browser. The application does not upload data files or generated reports to a server, store user files, or send dataset contents to a third-party API.
+All CSV and Excel parsing, filtering, processed data export, analysis, and report export run locally in the browser. The application does not upload data files or generated reports to a server, store user files, or send dataset contents to a third-party API.
 
 The page loads PapaParse, Chart.js, and SheetJS from CDN providers. When the page loads these external scripts, the browser may request resources from the CDN host, but uploaded data files remain local to the browser runtime.
 
@@ -240,7 +256,7 @@ The page loads PapaParse, Chart.js, and SheetJS from CDN providers. When the pag
 - Improve encoding and delimiter detection.
 - Add batch chart image export and richer report themes.
 - Add more chart types such as box plots, scatter plots, and stacked bar charts.
-- Support filtering, sorting, renaming fields, derived fields, and simple data cleaning operations.
+- Add sorting, field renaming, derived fields, and simple data cleaning operations.
 - Add saved analysis configurations.
 - Continue splitting core analysis logic into smaller modules and expand automated regression coverage.
 

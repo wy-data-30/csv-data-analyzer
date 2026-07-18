@@ -242,3 +242,81 @@ test("filtered statistics change while original quality outliers remain stable",
   assert.equal(evaluate("getAnalysisRows().length"), 5);
   assert.match(elements.get("previewTable").innerHTML, />100</);
 });
+
+test("processed CSV exports preserve fields, Chinese text, BOM and original rows", async () => {
+  const { context, elements, evaluate } = createScriptContext();
+  const rows = [
+    { 姓名: "张三", 备注: "上海,重点客户" },
+    { 姓名: "张三", 备注: "上海,重点客户" },
+    { 姓名: "李四", 备注: "包含\"引号\"" }
+  ];
+  put(context, "__rows", rows);
+  const originalSnapshot = JSON.stringify(rows);
+
+  context.window.Papa = {
+    unparse(input, options) {
+      context.__unparseInput = input;
+      context.__unparseOptions = options;
+      const escapeCell = (value) => {
+        const text = String(value ?? "");
+        return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+      };
+      return [
+        input.fields.map(escapeCell).join(","),
+        ...input.data.map((row) => row.map(escapeCell).join(","))
+      ].join(options.newline);
+    }
+  };
+
+  evaluate(`(() => {
+    state.rows = __rows;
+    state.filteredRows = [state.rows[2]];
+    state.filterSourceRows = state.rows;
+    state.fields = ["姓名", "备注"];
+    state.profiles = state.fields.map((field) => buildColumnProfile(field, state.rows));
+    state.duplicateRows = countDuplicateRows(state.rows, state.fields);
+    state.sourceFileName = "中文销售.xlsx";
+  })()`);
+
+  assert.equal(evaluate('getProcessedExportRows("filtered").length'), 1);
+  assert.equal(evaluate('getProcessedExportRows("deduplicated").length'), 2);
+  assert.equal(JSON.stringify(rows), originalSnapshot);
+
+  const csv = evaluate('buildCsvExportContent(getProcessedExportRows("deduplicated"), state.fields)');
+  assert.equal(
+    csv,
+    '姓名,备注\r\n张三,"上海,重点客户"\r\n李四,"包含""引号"""'
+  );
+  assert.deepEqual(Array.from(context.__unparseInput.fields), ["姓名", "备注"]);
+  assert.deepEqual(
+    Array.from(context.__unparseInput.data, (row) => Array.from(row)),
+    [["张三", "上海,重点客户"], ["李四", '包含"引号"']]
+  );
+  assert.equal(context.__unparseOptions.newline, "\r\n");
+
+  assert.equal(
+    evaluate('buildDataExportFileName("filtered", new Date(2026, 6, 18))'),
+    "中文销售_filtered_20260718.csv"
+  );
+  assert.equal(
+    evaluate('buildDataExportFileName("deduplicated", new Date(2026, 6, 18))'),
+    "中文销售_deduplicated_20260718.csv"
+  );
+
+  const blob = evaluate('createUtf8BomBlob("姓名,城市\\r\\n张三,上海", "text/csv;charset=utf-8")');
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  assert.deepEqual(Array.from(bytes.slice(0, 3)), [0xef, 0xbb, 0xbf]);
+
+  evaluate("updateExportButtons()");
+  assert.equal(elements.get("dataExportOriginalCount").textContent, "3");
+  assert.equal(elements.get("dataExportFilteredCount").textContent, "1");
+  assert.equal(elements.get("dataExportDeduplicatedCount").textContent, "2");
+  assert.equal(elements.get("exportFilteredCsv").disabled, false);
+  assert.equal(elements.get("exportDeduplicatedCsv").disabled, false);
+
+  evaluate("state.filteredRows = []");
+  assert.equal(
+    evaluate('buildCsvExportContent(getProcessedExportRows("filtered"), state.fields)'),
+    "姓名,备注"
+  );
+});

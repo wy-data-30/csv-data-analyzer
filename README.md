@@ -58,8 +58,11 @@ External libraries are loaded through CDN links in `index.html`.
 ├── style.css
 ├── script.js
 ├── assets/
+├── package.json
 ├── tests/
+│   ├── basic-data-processing.test.cjs
 │   ├── core.test.cjs
+│   ├── test-context.cjs
 │   └── fixtures/
 ├── sample-data.csv
 ├── sample-sales.csv
@@ -92,11 +95,19 @@ Using a local static server is recommended because some browsers restrict `fetch
 
 ## Running Tests
 
-The core regression suite requires Node.js. Run it from the project root:
+The automated test suite requires Node.js 18 or later. It uses only the Node.js built-in test runner, so no dependency installation is required. Run it from the project root:
+
+```bash
+npm test
+```
+
+You can also run the original full regression script directly:
 
 ```bash
 node tests/core.test.cjs
 ```
+
+The suite covers CSV encoding and normalized parsing, Excel worksheet conversion, Chinese fields, field type inference, missing values, duplicate rows, descriptive statistics, categorical frequencies, IQR outliers, empty input, single-column data, and datasets without numeric or categorical fields.
 
 ## Usage
 

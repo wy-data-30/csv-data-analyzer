@@ -1,64 +1,9 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
+const { createScriptContext } = require("./test-context.cjs");
 
-class FakeElement {
-  constructor() {
-    this.value = "";
-    this.innerHTML = "";
-    this.textContent = "";
-    this.dataset = {};
-    this.className = "";
-    this.options = [];
-    this.selectedIndex = 0;
-    this.classList = { add() {}, remove() {}, toggle() {} };
-  }
-
-  addEventListener() {}
-  focus() {}
-  removeAttribute() {}
-  scrollIntoView() {}
-  setAttribute() {}
-  querySelectorAll() { return []; }
-  getContext() {
-    return { clearRect() {}, save() {}, restore() {}, fillText() {} };
-  }
-}
-
-const elements = new Map();
-const document = {
-  getElementById(id) {
-    if (!elements.has(id)) elements.set(id, new FakeElement());
-    return elements.get(id);
-  },
-  querySelectorAll() { return []; },
-  createElement() { return new FakeElement(); },
-  body: new FakeElement()
-};
-
-const context = vm.createContext({
-  console,
-  document,
-  window: {
-    Chart: null,
-    addEventListener() {},
-    innerHeight: 900,
-    print() {},
-    requestAnimationFrame(callback) { callback(); return 1; },
-    scrollY: 0
-  },
-  TextDecoder,
-  Uint8Array,
-  Intl,
-  Blob,
-  URL,
-  setTimeout,
-  clearTimeout
-});
-
-const source = fs.readFileSync(path.join(__dirname, "..", "script.js"), "utf8");
-vm.runInContext(source, context, { filename: "script.js" });
+const { context, elements, source, evaluate } = createScriptContext();
 
 const projectRoot = path.join(__dirname, "..");
 const htmlSource = fs.readFileSync(path.join(projectRoot, "index.html"), "utf8");
@@ -100,10 +45,6 @@ assert.match(htmlSource, /<title>Smart Tabular Analyzer \| 智能表格数据分
 const legacyProductNamePattern = new RegExp(["Smart", "CSV", "Analyzer"].join(" "));
 assert.doesNotMatch(htmlSource, legacyProductNamePattern);
 assert.doesNotMatch(source, legacyProductNamePattern);
-
-function evaluate(expression) {
-  return vm.runInContext(expression, context);
-}
 
 const utf8CsvText = "姓名,城市\n张三,上海";
 const utf8CsvBytes = Array.from(new TextEncoder().encode(utf8CsvText));

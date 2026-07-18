@@ -64,8 +64,11 @@ CSV 文件经常来自不同系统或业务场景，字段结构并不固定。S
 ├── style.css
 ├── script.js
 ├── assets/
+├── package.json
 ├── tests/
+│   ├── basic-data-processing.test.cjs
 │   ├── core.test.cjs
+│   ├── test-context.cjs
 │   └── fixtures/
 ├── sample-data.csv
 ├── sample-sales.csv
@@ -98,11 +101,19 @@ http://localhost:8000
 
 ## 运行测试
 
-核心回归测试需要 Node.js。请在项目根目录运行：
+自动化测试需要 Node.js 18 或更高版本。测试只使用 Node.js 内置测试运行器，不需要安装第三方依赖。请在项目根目录运行：
+
+```bash
+npm test
+```
+
+也可以直接运行原有的完整回归测试脚本：
 
 ```bash
 node tests/core.test.cjs
 ```
+
+测试覆盖 CSV 编码与规范化解析、Excel 工作表转换、中文字段、字段类型识别、缺失值、重复行、描述性统计、分类频数、IQR 异常值、空数据、单列数据，以及缺少数值或分类字段的数据集。
 
 ## 使用方法
 

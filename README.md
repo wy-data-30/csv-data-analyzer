@@ -62,6 +62,7 @@ External libraries are loaded through CDN links in `index.html`.
 ├── assets/
 ├── package.json
 ├── tests/
+│   ├── data-processing.test.cjs
 │   ├── basic-data-processing.test.cjs
 │   ├── core.test.cjs
 │   ├── test-context.cjs
@@ -103,13 +104,25 @@ The automated test suite requires Node.js 18 or later. It uses only the Node.js 
 npm test
 ```
 
+If `npm` is unavailable, run the same full suite directly with Node.js:
+
+```bash
+node --test tests/data-processing.test.cjs tests/basic-data-processing.test.cjs tests/core.test.cjs
+```
+
+Run only the focused pure data-processing tests with:
+
+```bash
+node --test tests/data-processing.test.cjs
+```
+
 You can also run the original full regression script directly:
 
 ```bash
 node tests/core.test.cjs
 ```
 
-The suite covers CSV encoding and normalized parsing, Excel worksheet conversion, Chinese fields, field type inference, missing values, duplicate rows, combined filtering, processed CSV export, UTF-8 BOM output, descriptive statistics, categorical frequencies, IQR outliers, empty input, single-column data, and datasets without numeric or categorical fields.
+The focused suite covers numeric parsing, field type inference, missing values, complete-row duplicate detection, mean, median, population standard deviation, IQR outliers, categorical filters, numeric ranges, date ranges, combined filters, and clearing filters. The full suite also covers CSV encoding and normalized parsing, Excel worksheet conversion, Chinese fields, processed CSV export, UTF-8 BOM output, empty input, single-column data, and datasets without numeric or categorical fields.
 
 ## Usage
 

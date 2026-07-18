@@ -68,6 +68,7 @@ CSV 文件经常来自不同系统或业务场景，字段结构并不固定。S
 ├── assets/
 ├── package.json
 ├── tests/
+│   ├── data-processing.test.cjs
 │   ├── basic-data-processing.test.cjs
 │   ├── core.test.cjs
 │   ├── test-context.cjs
@@ -109,13 +110,25 @@ http://localhost:8000
 npm test
 ```
 
+如果当前环境没有 `npm`，可以直接使用 Node.js 运行同一套完整测试：
+
+```bash
+node --test tests/data-processing.test.cjs tests/basic-data-processing.test.cjs tests/core.test.cjs
+```
+
+只运行本次新增的纯数据处理测试：
+
+```bash
+node --test tests/data-processing.test.cjs
+```
+
 也可以直接运行原有的完整回归测试脚本：
 
 ```bash
 node tests/core.test.cjs
 ```
 
-测试覆盖 CSV 编码与规范化解析、Excel 工作表转换、中文字段、字段类型识别、缺失值、重复行、组合筛选、处理后 CSV 导出、UTF-8 BOM、描述性统计、分类频数、IQR 异常值、空数据、单列数据，以及缺少数值或分类字段的数据集。
+专项测试覆盖数值解析、字段类型识别、缺失值、整行重复识别、均值、中位数、总体标准差、IQR 异常值、分类筛选、数值范围、日期范围、多条件组合筛选和清除筛选。完整测试还覆盖 CSV 编码与规范化解析、Excel 工作表转换、中文字段、处理后 CSV 导出、UTF-8 BOM、空数据、单列数据，以及缺少数值或分类字段的数据集。
 
 ## 使用方法
 

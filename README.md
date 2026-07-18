@@ -1,12 +1,16 @@
-# Smart CSV Analyzer
+# Smart Tabular Analyzer
 
 **Current version:** V2.3
 
-**Live Demo:** [Open Smart CSV Analyzer](https://wy-data-30.github.io/csv-data-analyzer/)
+**Chinese name:** 智能表格数据分析工具
+
+**Subtitle:** Browser-based CSV and Excel data analysis tool
+
+**Live Demo:** [Open Smart Tabular Analyzer](https://wy-data-30.github.io/csv-data-analyzer/)
 
 [中文说明](./README.zh-CN.md)
 
-Smart CSV Analyzer is a browser-based CSV and Excel analysis tool for quick exploration of structured data files. After a user uploads a file, the application performs data preview, field type detection, data quality checks, descriptive statistics, chart generation, custom grouping analysis, and basic insight generation entirely in the browser.
+Smart Tabular Analyzer is a browser-based CSV and Excel data analysis tool for quick exploration of structured data files. After a user uploads a file, the application performs data preview, field type detection, data quality checks, descriptive statistics, chart generation, custom grouping analysis, and basic insight generation entirely in the browser.
 
 The project is built as a static website and does not require a backend service, database, account system, or build step.
 

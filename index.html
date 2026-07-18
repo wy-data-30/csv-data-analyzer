@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Smart CSV Analyzer</title>
+  <title>Smart Tabular Analyzer | 智能表格数据分析工具</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -11,68 +11,74 @@
 </head>
 <body>
   <a class="skip-link" href="#mainContent">跳到主要内容</a>
+
   <header class="app-header">
     <div class="header-inner">
-      <a class="brand" href="#mainContent" aria-label="Smart CSV Analyzer 首页">
+      <a class="brand" href="#mainContent" aria-label="Smart Tabular Analyzer 首页">
         <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 40 40" role="img">
+          <svg viewBox="0 0 40 40">
             <rect x="10" y="9.5" width="20" height="21" rx="3" fill="none" stroke="currentColor" stroke-width="2.2"/>
             <path d="M10 16.5h20M17 9.5v21M24 16.5v14" fill="none" stroke="currentColor" stroke-width="2.2"/>
             <path d="m25.5 8 2.1 2.1L32 5.7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2"/>
           </svg>
         </span>
         <span class="brand-copy">
-          <strong>Smart CSV Analyzer</strong>
-          <small>CSV 智能分析工作台</small>
+          <strong>Smart Tabular Analyzer</strong>
+          <small>智能表格数据分析工具</small>
         </span>
-        <span class="version-badge">V2.3</span>
       </a>
+
       <div class="header-actions">
         <span class="privacy-badge">
           <svg viewBox="0 0 20 20" aria-hidden="true">
             <path d="M10 2.5 16 5v4.4c0 3.8-2.4 6.6-6 8.1-3.6-1.5-6-4.3-6-8.1V5l6-2.5Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5"/>
             <path d="m7.5 10 1.7 1.7 3.5-3.6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/>
           </svg>
-          本地分析 · 数据不上云
+          数据仅在浏览器本地处理
         </span>
-        <a class="header-cta" href="#dropZone">开始分析</a>
+        <a class="header-cta" href="#dropZone">上传文件</a>
       </div>
     </div>
   </header>
 
   <main id="mainContent" class="app-shell">
-    <section class="hero-section" aria-labelledby="heroTitle">
-      <div class="hero-copy">
-        <p class="eyebrow"><span></span> Browser-based data workspace</p>
-        <h1 id="heroTitle">让每一份数据，<br><em>更快抵达结论。</em></h1>
-        <p class="subtitle">无需代码与复杂配置，上传文件即可获得字段识别、质量诊断、统计图表和场景化洞察。</p>
-        <div class="workflow-list" aria-label="分析流程">
-          <div><span>01</span><strong>导入数据</strong><small>支持多种中文编码</small></div>
-          <div><span>02</span><strong>自动识别</strong><small>字段、质量与异常</small></div>
-          <div><span>03</span><strong>生成洞察</strong><small>图表与分析结论</small></div>
-        </div>
+    <section class="workspace-intro" aria-labelledby="heroTitle">
+      <div class="product-summary">
+        <p class="eyebrow" lang="en">Browser-based CSV and Excel data analysis tool</p>
+        <h1 id="heroTitle">智能表格数据分析工具</h1>
+        <p class="product-description">上传数据后即可完成字段识别、质量检查、描述性统计、图表分析和报告导出。无需安装软件，文件内容不会上传到服务器。</p>
+        <ul class="product-capabilities" aria-label="主要功能">
+          <li>自动识别数值、分类、日期和 ID 字段</li>
+          <li>检查缺失值、重复行和数值异常</li>
+          <li>生成统计图表、分析结论和本地报告</li>
+        </ul>
       </div>
 
       <section id="dropZone" class="upload-panel" aria-labelledby="uploadTitle">
-        <div class="drop-illustration" aria-hidden="true">
-          <svg viewBox="0 0 64 64">
-            <path d="M19 10h19l10 10v34H19a5 5 0 0 1-5-5V15a5 5 0 0 1 5-5Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="2.4"/>
-            <path d="M38 10v10h10M25 39l7-7 7 7M32 32v14" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4"/>
-          </svg>
+        <div class="upload-heading">
+          <span class="upload-icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48">
+              <path d="M14 7h15l8 8v26H14a4 4 0 0 1-4-4V11a4 4 0 0 1 4-4Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="2"/>
+              <path d="M29 7v8h8M18 30l6-6 6 6M24 24v11" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+            </svg>
+          </span>
+          <div>
+            <h2 id="uploadTitle">上传数据文件</h2>
+            <p>拖放文件到此处，或从本地选择 CSV、XLSX、XLS 文件。</p>
+          </div>
         </div>
-        <div class="upload-copy">
-          <p class="section-kicker">Upload workspace</p>
-          <h2 id="uploadTitle">拖放 CSV 或 Excel 文件到这里</h2>
-          <p>或从本地选择文件，解析过程仅在当前浏览器中完成。</p>
-        </div>
+
+        <input id="csvFile" type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel">
         <label class="file-button" for="csvFile">
-          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 13.8V3.5m0 0L6.4 7.1M10 3.5l3.6 3.6M4 12.5v2.3a1.7 1.7 0 0 0 1.7 1.7h8.6a1.7 1.7 0 0 0 1.7-1.7v-2.3" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"/></svg>
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M10 13.8V3.5m0 0L6.4 7.1M10 3.5l3.6 3.6M4 12.5v2.3a1.7 1.7 0 0 0 1.7 1.7h8.6a1.7 1.7 0 0 0 1.7-1.7v-2.3" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"/>
+          </svg>
           选择数据文件
         </label>
-        <input id="csvFile" type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel">
-        <div class="upload-actions">
+
+        <div class="upload-options">
           <label class="encoding-control" for="fileEncoding">
-            <span>文件编码</span>
+            <span>CSV 文件编码</span>
             <select id="fileEncoding">
               <option value="auto" selected>自动识别</option>
               <option value="utf-8">UTF-8</option>
@@ -80,27 +86,29 @@
               <option value="gb18030">GB18030</option>
             </select>
           </label>
-          <button id="loadSample" type="button">
-            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.8 3.8h6.6l2.8 2.8v9.6H5.8a1.8 1.8 0 0 1-1.8-1.8V5.6a1.8 1.8 0 0 1 1.8-1.8Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5"/><path d="M12.4 3.8v2.8h2.8M7 10h5.3M7 13h4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/></svg>
-            加载示例
+          <button id="loadSample" class="secondary-button" type="button">
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M5.8 3.8h6.6l2.8 2.8v9.6H5.8a1.8 1.8 0 0 1-1.8-1.8V5.6a1.8 1.8 0 0 1 1.8-1.8Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5"/>
+              <path d="M12.4 3.8v2.8h2.8M7 10h5.3M7 13h4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/>
+            </svg>
+            使用示例数据
           </button>
-          <a class="secondary-button" href="sample-data.csv" download>下载样例</a>
         </div>
-        <div class="upload-meta">
-          <span>CSV / XLSX / XLS</span>
-          <span>UTF-8 / GBK / GB18030</span>
-          <span>自动字段识别</span>
+
+        <div class="upload-footer">
+          <p>CSV 编码不确定时保持“自动识别”即可；Excel 文件不受此设置影响。</p>
+          <a href="sample-data.csv" download>下载示例 CSV</a>
         </div>
       </section>
     </section>
 
-    <section id="statusPanel" class="status-panel hidden" aria-live="polite"></section>
+    <section id="statusPanel" class="status-panel hidden" role="status" aria-live="polite" aria-atomic="true"></section>
 
     <section id="sheetSelectionPanel" class="sheet-selection-panel hidden" aria-labelledby="sheetSelectionTitle">
       <div>
-        <p class="section-kicker">Excel workbook</p>
+        <p class="section-label">Excel 工作簿</p>
         <h2 id="sheetSelectionTitle">选择要分析的工作表</h2>
-        <p id="excelWorkbookName" class="muted"></p>
+        <p id="excelWorkbookName" class="muted-text"></p>
       </div>
       <div class="sheet-selection-controls">
         <label for="excelSheetSelect">
@@ -112,45 +120,84 @@
       <p id="sheetSelectionMessage" class="sheet-selection-message" aria-live="polite"></p>
     </section>
 
-    <section id="results" class="results hidden" aria-label="分析报告">
-      <aside class="results-nav" aria-label="报告目录">
-        <div class="results-nav-heading">
-          <span class="nav-status-dot" aria-hidden="true"></span>
-          <div><strong>分析报告</strong><small>已完成自动解析</small></div>
+    <section id="results" class="results hidden" aria-labelledby="reportTitle">
+      <header class="report-header">
+        <div>
+          <p class="section-label">分析工作区</p>
+          <h2 id="reportTitle" tabindex="-1">数据分析报告</h2>
+          <p id="sourceName" class="source-name"></p>
         </div>
+        <a class="nav-new-analysis secondary-button" href="#dropZone">上传新文件</a>
+      </header>
+
+      <ol class="workflow-status" aria-label="分析流程状态">
+        <li id="workflowStepUpload" data-state="complete">
+          <span class="step-number">1</span>
+          <span class="step-copy"><strong>文件上传</strong><small class="step-state">已完成</small></span>
+        </li>
+        <li id="workflowStepSchema" data-state="complete">
+          <span class="step-number">2</span>
+          <span class="step-copy"><strong>字段配置</strong><small class="step-state">自动识别完成</small></span>
+        </li>
+        <li id="workflowStepAnalysis" data-state="complete">
+          <span class="step-number">3</span>
+          <span class="step-copy"><strong>数据分析</strong><small class="step-state">已生成</small></span>
+        </li>
+        <li id="workflowStepExport" data-state="current">
+          <span class="step-number">4</span>
+          <span class="step-copy"><strong>报告导出</strong><small class="step-state">可导出</small></span>
+        </li>
+      </ol>
+
+      <aside class="results-nav" aria-label="报告目录">
         <nav>
           <a class="active" href="#overviewSection"><span>01</span>数据概览</a>
-          <a href="#schemaSection"><span>02</span>字段配置</a>
-          <a href="#qualitySection"><span>03</span>数据质量</a>
-          <a href="#statisticsSection"><span>04</span>描述统计</a>
+          <a href="#qualitySection"><span>02</span>数据质量</a>
+          <a href="#schemaSection"><span>03</span>字段配置</a>
+          <a href="#statisticsSection"><span>04</span>描述性统计</a>
           <a href="#chartsSection"><span>05</span>图表分析</a>
           <a href="#customSection"><span>06</span>自定义分析</a>
           <a href="#insightsSection"><span>07</span>分析结论</a>
+          <a href="#reportSection"><span>08</span>报告导出</a>
         </nav>
-        <a class="nav-new-analysis" href="#dropZone">＋ 分析新文件</a>
-        <div class="report-actions" aria-labelledby="reportActionsTitle">
-          <div class="report-actions-copy">
-            <strong id="reportActionsTitle">导出报告</strong>
-            <small id="reportExportHint">报告在浏览器本地生成，数据不会上传</small>
-          </div>
-          <button id="exportHtmlReport" type="button" aria-describedby="reportExportHint" disabled>导出 HTML 报告</button>
-          <button id="exportMarkdownReport" type="button" aria-describedby="reportExportHint" disabled>导出 Markdown 报告</button>
-        </div>
       </aside>
 
       <section id="overviewSection" class="section-block">
         <div class="section-heading">
           <div>
-            <p class="section-kicker">Overview</p>
-            <h2>数据概览</h2>
+            <p class="section-label">数据概览</p>
+            <h2>数据规模与预览</h2>
           </div>
-          <p id="sourceName" class="muted"></p>
         </div>
         <div id="overviewCards" class="metric-grid"></div>
         <div class="module-subsection">
           <h3 class="subsection-title">前 10 行数据预览</h3>
-          <div class="table-wrap">
-            <table id="previewTable"></table>
+          <div class="table-wrap" tabindex="0" aria-label="数据预览表，可横向滚动">
+            <table id="previewTable" aria-label="前 10 行数据预览"></table>
+          </div>
+        </div>
+      </section>
+
+      <section id="qualitySection" class="section-block">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">数据质量</p>
+            <h2>缺失、重复与异常检查</h2>
+          </div>
+        </div>
+        <div id="qualitySummary" class="quality-summary"></div>
+        <div class="two-column">
+          <div>
+            <h3 class="subsection-title">缺失值检查</h3>
+            <div class="table-wrap compact" tabindex="0" aria-label="缺失值检查表，可横向滚动">
+              <table id="qualityTable" aria-label="字段缺失值检查"></table>
+            </div>
+          </div>
+          <div>
+            <h3 class="subsection-title">数值字段异常值检查</h3>
+            <div class="table-wrap compact" tabindex="0" aria-label="异常值检查表，可横向滚动">
+              <table id="outlierTable" aria-label="数值字段异常值检查"></table>
+            </div>
           </div>
         </div>
       </section>
@@ -158,11 +205,11 @@
       <section id="schemaSection" class="section-block">
         <div class="section-heading">
           <div>
-            <p class="section-kicker">Schema</p>
-            <h2>字段类型确认与修正</h2>
+            <p class="section-label">字段配置</p>
+            <h2>确认字段类型</h2>
           </div>
         </div>
-        <p class="section-note">系统会自动推断字段类型。修改配置后点击“应用字段配置”，统计、图表和分析结论才会统一重新计算；无法安全转换的非空值会被跳过并计入失败数量。</p>
+        <p class="section-note">系统已自动推断字段类型。只有在识别不准确时才需要修改；应用后会统一重新计算统计、图表和分析结论。</p>
         <div class="field-config-toolbar">
           <p id="fieldConfigMessage" class="field-config-message" aria-live="polite"></p>
           <div class="field-config-actions">
@@ -170,46 +217,22 @@
             <button id="applyFieldConfig" type="button" disabled>应用字段配置</button>
           </div>
         </div>
-        <div class="table-wrap">
-          <table id="schemaTable" aria-describedby="fieldConfigMessage"></table>
-        </div>
-      </section>
-
-      <section id="qualitySection" class="section-block">
-        <div class="section-heading">
-          <div>
-            <p class="section-kicker">Quality</p>
-            <h2>数据质量报告</h2>
-          </div>
-        </div>
-        <div id="qualitySummary" class="quality-summary"></div>
-        <div class="two-column">
-          <div>
-            <h3 class="subsection-title">缺失值检查</h3>
-            <div class="table-wrap compact">
-              <table id="qualityTable"></table>
-            </div>
-          </div>
-          <div>
-            <h3 class="subsection-title">数值字段异常值检查</h3>
-            <div class="table-wrap compact">
-              <table id="outlierTable"></table>
-            </div>
-          </div>
+        <div class="table-wrap" tabindex="0" aria-label="字段配置表，可横向滚动">
+          <table id="schemaTable" aria-label="字段类型配置" aria-describedby="fieldConfigMessage"></table>
         </div>
       </section>
 
       <section id="statisticsSection" class="section-block">
         <div class="section-heading">
           <div>
-            <p class="section-kicker">Statistics</p>
-            <h2>描述性统计</h2>
+            <p class="section-label">描述性统计</p>
+            <h2>数值与分类统计</h2>
           </div>
         </div>
         <div class="module-subsection first">
           <h3 class="subsection-title">数值字段统计指标</h3>
-          <div class="table-wrap">
-            <table id="numericStatsTable"></table>
+          <div class="table-wrap" tabindex="0" aria-label="数值字段统计表，可横向滚动">
+            <table id="numericStatsTable" aria-label="数值字段描述性统计"></table>
           </div>
         </div>
         <div class="module-subsection">
@@ -221,31 +244,31 @@
       <section id="chartsSection" class="section-block">
         <div class="section-heading">
           <div>
-            <p class="section-kicker">Charts</p>
-            <h2>图表分析</h2>
+            <p class="section-label">图表分析</p>
+            <h2>字段分布与趋势</h2>
           </div>
         </div>
         <div class="chart-grid">
           <div class="chart-card">
             <div class="chart-header">
               <h3>数值字段分布</h3>
-              <select id="numericChartField"></select>
+              <label class="chart-control" for="numericChartField"><span>选择字段</span><select id="numericChartField"></select></label>
             </div>
-            <div class="chart-frame"><canvas id="numericDistributionChart"></canvas></div>
+            <div class="chart-frame"><canvas id="numericDistributionChart" role="img" aria-label="数值字段分布图"></canvas></div>
           </div>
           <div class="chart-card">
             <div class="chart-header">
               <h3>分类字段 Top 10</h3>
-              <select id="categoryChartField"></select>
+              <label class="chart-control" for="categoryChartField"><span>选择字段</span><select id="categoryChartField"></select></label>
             </div>
-            <div class="chart-frame"><canvas id="categoryTopChart"></canvas></div>
+            <div class="chart-frame"><canvas id="categoryTopChart" role="img" aria-label="分类字段前十项图表"></canvas></div>
           </div>
           <div class="chart-card wide">
             <div class="chart-header">
               <h3>日期字段趋势</h3>
-              <select id="dateChartField"></select>
+              <label class="chart-control" for="dateChartField"><span>选择字段</span><select id="dateChartField"></select></label>
             </div>
-            <div class="chart-frame"><canvas id="dateTrendChart"></canvas></div>
+            <div class="chart-frame"><canvas id="dateTrendChart" role="img" aria-label="日期字段趋势图"></canvas></div>
           </div>
         </div>
       </section>
@@ -253,67 +276,56 @@
       <section id="customSection" class="section-block">
         <div class="section-heading">
           <div>
-            <p class="section-kicker">Custom Analysis</p>
-            <h2>自定义分析</h2>
+            <p class="section-label">自定义分析</p>
+            <h2>按业务需要组合字段</h2>
           </div>
         </div>
+        <p class="section-note">快速汇总适合自由选择指标与分组；场景模板提供常见分析结构；分组图表用于快速切换汇总方式。</p>
 
-        <div class="module-subsection first">
-          <h3 class="subsection-title">字段选择器与通用分析</h3>
-          <div class="field-selector-panel">
-            <label>
-              分析指标字段
-              <select id="v2MetricField"></select>
-            </label>
-            <label>
-              分组维度字段
-              <select id="v2GroupField"></select>
-            </label>
-            <label>
-              时间字段（可选）
-              <select id="v2DateField"></select>
-            </label>
-            <button id="v2AnalyzeButton" type="button">重新选择字段并分析</button>
+        <div class="analysis-panel">
+          <div class="analysis-panel-heading">
+            <h3 class="subsection-title">快速汇总分析</h3>
+            <p>选择指标、分组和可选时间字段，生成汇总表与趋势图。</p>
           </div>
-          <div id="v2FieldPrompt" class="analysis-prompt"></div>
+          <div class="field-selector-panel">
+            <label>分析指标字段<select id="v2MetricField"></select></label>
+            <label>分组维度字段<select id="v2GroupField"></select></label>
+            <label>时间字段（可选）<select id="v2DateField"></select></label>
+            <button id="v2AnalyzeButton" type="button">生成自定义分析</button>
+          </div>
+          <div id="v2FieldPrompt" class="analysis-prompt" aria-live="polite"></div>
           <div id="v2AnalysisResults" class="v2-analysis-results hidden">
             <div id="v2SummaryCards" class="analysis-summary-grid"></div>
             <div class="two-column">
               <div>
-                <h3 class="subsection-title">按分组字段求和结果</h3>
-                <div class="table-wrap compact">
-                  <table id="v2SumTable"></table>
-                </div>
+                <h3 class="subsection-title">按分组字段求和</h3>
+                <div class="table-wrap compact" tabindex="0" aria-label="分组求和结果，可横向滚动"><table id="v2SumTable" aria-label="分组求和结果"></table></div>
               </div>
               <div>
-                <h3 class="subsection-title">按分组字段平均值结果</h3>
-                <div class="table-wrap compact">
-                  <table id="v2AvgTable"></table>
-                </div>
+                <h3 class="subsection-title">按分组字段平均值</h3>
+                <div class="table-wrap compact" tabindex="0" aria-label="分组平均值结果，可横向滚动"><table id="v2AvgTable" aria-label="分组平均值结果"></table></div>
               </div>
             </div>
             <div class="chart-grid">
               <div class="chart-card">
-                <div class="chart-header">
-                  <h3>Top 10 分组柱状图</h3>
-                </div>
-                <div class="chart-frame"><canvas id="v2TopGroupChart"></canvas></div>
+                <div class="chart-header"><h3>Top 10 分组柱状图</h3></div>
+                <div class="chart-frame"><canvas id="v2TopGroupChart" role="img" aria-label="自定义分析分组柱状图"></canvas></div>
               </div>
               <div id="v2TrendCard" class="chart-card">
-                <div class="chart-header">
-                  <h3>时间趋势图</h3>
-                </div>
-                <div class="chart-frame"><canvas id="v2SelectedTrendChart"></canvas></div>
+                <div class="chart-header"><h3>时间趋势图</h3></div>
+                <div class="chart-frame"><canvas id="v2SelectedTrendChart" role="img" aria-label="自定义分析时间趋势图"></canvas></div>
               </div>
             </div>
           </div>
         </div>
 
-        <div class="module-subsection">
-          <h3 class="subsection-title">场景模板分析</h3>
+        <div class="analysis-panel">
+          <div class="analysis-panel-heading">
+            <h3 class="subsection-title">场景模板分析</h3>
+            <p>使用销售、成绩、问卷等模板组织常用指标。</p>
+          </div>
           <div class="template-selector-panel">
-            <label>
-              分析模板
+            <label>分析模板
               <select id="scenarioTemplate">
                 <option value="generic">通用数据分析</option>
                 <option value="sales">销售数据分析</option>
@@ -325,52 +337,38 @@
             </label>
           </div>
           <div id="templateMappingForm" class="template-mapping-grid"></div>
-          <div class="template-actions">
-            <button id="runTemplateAnalysis" type="button">按模板生成分析</button>
-          </div>
-          <div id="templatePrompt" class="analysis-prompt"></div>
+          <div class="template-actions"><button id="runTemplateAnalysis" type="button">按模板生成分析</button></div>
+          <div id="templatePrompt" class="analysis-prompt" aria-live="polite"></div>
           <div id="templateResults" class="template-results hidden">
             <div id="templateSummaryCards" class="analysis-summary-grid"></div>
             <div id="templateInsights" class="insights"></div>
-            <div class="table-wrap">
-              <table id="templatePrimaryTable"></table>
-            </div>
+            <div class="table-wrap" tabindex="0" aria-label="模板分析结果，可横向滚动"><table id="templatePrimaryTable" aria-label="模板分析结果"></table></div>
             <div class="chart-grid">
               <div class="chart-card">
-                <div class="chart-header">
-                  <h3 id="templateMainChartTitle">模板主图</h3>
-                </div>
-                <div class="chart-frame"><canvas id="templateMainChart"></canvas></div>
+                <div class="chart-header"><h3 id="templateMainChartTitle">模板主图</h3></div>
+                <div class="chart-frame"><canvas id="templateMainChart" role="img" aria-label="模板分析主图"></canvas></div>
               </div>
               <div class="chart-card">
-                <div class="chart-header">
-                  <h3 id="templateSecondaryChartTitle">模板辅助图</h3>
-                </div>
-                <div class="chart-frame"><canvas id="templateSecondaryChart"></canvas></div>
+                <div class="chart-header"><h3 id="templateSecondaryChartTitle">模板辅助图</h3></div>
+                <div class="chart-frame"><canvas id="templateSecondaryChart" role="img" aria-label="模板分析辅助图"></canvas></div>
               </div>
               <div id="templateTrendCard" class="chart-card wide">
-                <div class="chart-header">
-                  <h3 id="templateTrendChartTitle">时间趋势</h3>
-                </div>
-                <div class="chart-frame"><canvas id="templateTrendChart"></canvas></div>
+                <div class="chart-header"><h3 id="templateTrendChartTitle">时间趋势</h3></div>
+                <div class="chart-frame"><canvas id="templateTrendChart" role="img" aria-label="模板分析时间趋势图"></canvas></div>
               </div>
             </div>
           </div>
         </div>
 
-        <div class="module-subsection">
-          <h3 class="subsection-title">自定义分组图</h3>
+        <div class="analysis-panel">
+          <div class="analysis-panel-heading">
+            <h3 class="subsection-title">快速分组图表</h3>
+            <p>切换指标、维度和汇总方式，立即查看分组结果。</p>
+          </div>
           <div class="control-row">
-            <label>
-              分析指标
-              <select id="metricField"></select>
-            </label>
-            <label>
-              分组维度
-              <select id="groupField"></select>
-            </label>
-            <label>
-              汇总方式
+            <label>分析指标<select id="metricField"></select></label>
+            <label>分组维度<select id="groupField"></select></label>
+            <label>汇总方式
               <select id="aggregateMethod">
                 <option value="sum">合计</option>
                 <option value="avg">平均值</option>
@@ -378,25 +376,45 @@
               </select>
             </label>
           </div>
-          <div class="chart-frame custom-chart"><canvas id="customAnalysisChart"></canvas></div>
+          <div class="chart-frame custom-chart"><canvas id="customAnalysisChart" role="img" aria-label="自定义分组图表"></canvas></div>
         </div>
       </section>
 
       <section id="insightsSection" class="section-block">
         <div class="section-heading">
           <div>
-            <p class="section-kicker">Insights</p>
-            <h2>分析结论</h2>
+            <p class="section-label">分析结论</p>
+            <h2>主要发现</h2>
           </div>
         </div>
         <div id="insights" class="insights"></div>
+      </section>
+
+      <section id="reportSection" class="section-block report-section">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">报告导出</p>
+            <h2>保存分析结果</h2>
+          </div>
+        </div>
+        <div class="report-export-layout">
+          <div class="report-export-copy">
+            <h3 id="reportActionsTitle">在浏览器本地生成报告</h3>
+            <p id="reportExportHint">HTML 报告包含当前图表，Markdown 报告适合继续编辑。导出过程不会上传数据。</p>
+          </div>
+          <div class="report-actions" aria-labelledby="reportExportHint">
+            <button id="exportHtmlReport" type="button" aria-describedby="reportExportHint" disabled>导出 HTML 报告</button>
+            <button id="exportMarkdownReport" class="secondary-button" type="button" aria-describedby="reportExportHint" disabled>导出 Markdown 报告</button>
+          </div>
+        </div>
+        <p id="reportExportStatus" class="inline-status" aria-live="polite"></p>
       </section>
     </section>
   </main>
 
   <footer class="app-footer">
-    <p><strong>Smart CSV Analyzer</strong> · 轻量、私密、开箱即用的数据分析工具</p>
-    <p>所有数据仅在浏览器本地处理</p>
+    <p><strong>Smart Tabular Analyzer</strong> · 智能表格数据分析工具</p>
+    <p>文件内容不会上传到服务器</p>
   </footer>
 
   <script src="script.js"></script>

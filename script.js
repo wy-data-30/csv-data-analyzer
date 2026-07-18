@@ -32,6 +32,7 @@ const dom = {
   confirmSheetSelection: document.getElementById("confirmSheetSelection"),
   sheetSelectionMessage: document.getElementById("sheetSelectionMessage"),
   results: document.getElementById("results"),
+  reportTitle: document.getElementById("reportTitle"),
   sourceName: document.getElementById("sourceName"),
   overviewCards: document.getElementById("overviewCards"),
   insights: document.getElementById("insights"),
@@ -74,7 +75,12 @@ const dom = {
   templateTrendCard: document.getElementById("templateTrendCard"),
   templateTrendChartTitle: document.getElementById("templateTrendChartTitle"),
   exportHtmlReport: document.getElementById("exportHtmlReport"),
-  exportMarkdownReport: document.getElementById("exportMarkdownReport")
+  exportMarkdownReport: document.getElementById("exportMarkdownReport"),
+  reportExportStatus: document.getElementById("reportExportStatus"),
+  workflowStepUpload: document.getElementById("workflowStepUpload"),
+  workflowStepSchema: document.getElementById("workflowStepSchema"),
+  workflowStepAnalysis: document.getElementById("workflowStepAnalysis"),
+  workflowStepExport: document.getElementById("workflowStepExport")
 };
 
 const ENCODING_LABELS = {
@@ -178,6 +184,7 @@ const TEMPLATE_DEFINITIONS = {
 };
 
 setupResultNavigation();
+setupWorkspaceNavigation();
 
 dom.fileInput.addEventListener("change", (event) => {
   const file = event.target.files[0];
@@ -257,7 +264,7 @@ updateExportButtons();
   control.addEventListener("change", () => {
     if (state.rows.length) {
       dom.v2FieldPrompt.className = "analysis-prompt";
-      dom.v2FieldPrompt.textContent = "字段已更新，点击“重新选择字段并分析”生成新的结果。";
+      dom.v2FieldPrompt.textContent = "字段已更新，点击“生成自定义分析”生成新的结果。";
     }
   });
 });
@@ -270,29 +277,120 @@ function setupResultNavigation() {
 
   const setActiveLink = (sectionId) => {
     links.forEach((link) => {
-      link.classList.toggle("active", link.getAttribute("href") === `#${sectionId}`);
+      const isActive = link.getAttribute("href") === `#${sectionId}`;
+      link.classList.toggle("active", isActive);
+      if (isActive) {
+        link.setAttribute("aria-current", "location");
+      } else {
+        link.removeAttribute("aria-current");
+      }
     });
   };
 
   links.forEach((link) => {
-    link.addEventListener("click", () => {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
       const sectionId = link.getAttribute("href").slice(1);
       setActiveLink(sectionId);
+      window.history.replaceState(null, "", `#${sectionId}`);
+      document.getElementById(sectionId)?.scrollIntoView({ block: "start" });
     });
   });
 
-  if ("IntersectionObserver" in window) {
-    const observer = new IntersectionObserver((entries) => {
-      const visibleSection = entries
-        .filter((entry) => entry.isIntersecting)
-        .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-      if (visibleSection) setActiveLink(visibleSection.target.id);
-    }, {
-      rootMargin: "-15% 0px -68% 0px",
-      threshold: [0, 0.1, 0.35]
-    });
-    sections.forEach((section) => observer.observe(section));
+  let navigationFrame = null;
+  const updateActiveLinkFromScroll = () => {
+    navigationFrame = null;
+    const isAtPageEnd = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+    if (isAtPageEnd && sections.length) {
+      setActiveLink(sections[sections.length - 1].id);
+      return;
+    }
+
+    const readingLine = Math.min(320, window.innerHeight * 0.35);
+    const currentSection = sections.reduce((current, section) => (
+      section.getBoundingClientRect().top <= readingLine ? section : current
+    ), sections[0]);
+    if (currentSection) setActiveLink(currentSection.id);
+  };
+
+  if (typeof window.addEventListener === "function") {
+    window.addEventListener("scroll", () => {
+      if (navigationFrame !== null) return;
+      navigationFrame = window.requestAnimationFrame(updateActiveLinkFromScroll);
+    }, { passive: true });
   }
+
+  if (sections[0]) setActiveLink(sections[0].id);
+}
+
+function setupWorkspaceNavigation() {
+  document.querySelectorAll(".header-cta, .nav-new-analysis").forEach((link) => {
+    link.addEventListener("click", () => {
+      document.body.classList.remove("has-results");
+      dom.results.classList.add("hidden");
+      dom.statusPanel.className = "status-panel hidden";
+      dom.statusPanel.textContent = "";
+      dom.statusPanel.removeAttribute("aria-busy");
+      setImportBusy(false);
+    });
+  });
+}
+
+function setImportBusy(isBusy) {
+  document.body.classList.toggle("is-loading", isBusy);
+  dom.fileInput.disabled = isBusy;
+  dom.loadSample.disabled = isBusy;
+  dom.confirmSheetSelection.disabled = isBusy;
+  dom.dropZone.setAttribute("aria-busy", String(isBusy));
+}
+
+function showResultsWorkspace() {
+  document.body.classList.add("has-results");
+  setImportBusy(false);
+  updateWorkflowSteps();
+  window.requestAnimationFrame(() => {
+    dom.reportTitle?.focus({ preventScroll: true });
+    dom.results.scrollIntoView({ block: "start" });
+  });
+}
+
+function updateWorkflowSteps() {
+  if (!dom.workflowStepUpload) return;
+
+  const setStep = (element, stateKey, label) => {
+    if (!element) return;
+    element.dataset.state = stateKey;
+    const stateLabel = typeof element.querySelector === "function"
+      ? element.querySelector(".step-state")
+      : null;
+    if (stateLabel) stateLabel.textContent = label;
+  };
+
+  if (!state.rows.length) {
+    setStep(dom.workflowStepUpload, "current", "等待文件");
+    setStep(dom.workflowStepSchema, "pending", "等待上传");
+    setStep(dom.workflowStepAnalysis, "pending", "等待配置");
+    setStep(dom.workflowStepExport, "pending", "等待分析");
+    return;
+  }
+
+  const hasDraftChanges = hasFieldConfigDraftChanges();
+  setStep(dom.workflowStepUpload, "complete", "已完成");
+
+  if (hasDraftChanges) {
+    setStep(dom.workflowStepSchema, "current", "有未应用修改");
+    setStep(dom.workflowStepAnalysis, "pending", "等待重新计算");
+    setStep(dom.workflowStepExport, "pending", "暂不可导出");
+    return;
+  }
+
+  setStep(
+    dom.workflowStepSchema,
+    "complete",
+    hasAutomaticTypeDifferences() ? "配置已应用" : "自动识别完成"
+  );
+  setStep(dom.workflowStepAnalysis, state.analysisCompletedAt ? "complete" : "current", state.analysisCompletedAt ? "已生成" : "正在生成");
+  setStep(dom.workflowStepExport, canExportReport() ? "current" : "pending", canExportReport() ? "可导出" : "等待分析");
 }
 
 async function parseCsvFile(file) {
@@ -350,6 +448,7 @@ async function parseExcelFile(file) {
 
 function showExcelSheetSelection(workbook, fileName, sheetNames, importId) {
   if (!isCurrentImport(importId)) return;
+  setImportBusy(false);
   state.pendingExcel = { workbook, fileName, importId };
   dom.excelWorkbookName.textContent = `${fileName} · 共 ${sheetNames.length} 个工作表`;
   dom.excelSheetSelect.innerHTML = "";
@@ -546,6 +645,7 @@ function decodeCsvHeaderFromParser(header) {
 function beginImport() {
   state.activeImportId += 1;
   resetAnalysisState();
+  setImportBusy(true);
   return state.activeImportId;
 }
 
@@ -715,8 +815,7 @@ function commitTabularData(fields, rows, sourceName, importId, parseWarnings = [
     const affectedRows = new Set(state.parseWarnings.map((warning) => warning.row).filter(Boolean)).size;
     setStatus(`CSV 已载入，但发现 ${state.parseWarnings.length} 个解析警告${affectedRows ? `，涉及 ${affectedRows} 行` : ""}。请核对数据预览和字段数量。`, "warning");
   } else {
-    dom.statusPanel.className = "status-panel hidden";
-    dom.statusPanel.textContent = "";
+    setStatus(`${sourceDisplayName} 已成功载入，分析结果已生成。`, "success");
   }
 
   renderOverview();
@@ -732,6 +831,7 @@ function commitTabularData(fields, rows, sourceName, importId, parseWarnings = [
   renderTemplateMappingForm();
   resetTemplateResults("字段识别已完成。请选择分析模板并映射字段。");
   updateExportButtons();
+  showResultsWorkspace();
 }
 
 function buildColumnProfile(field, rows) {
@@ -1396,7 +1496,7 @@ function resetV2AnalysisState() {
   state.customAnalysis = null;
   dom.v2AnalysisResults.classList.add("hidden");
   dom.v2FieldPrompt.className = "analysis-prompt";
-  dom.v2FieldPrompt.textContent = "请选择一个数值指标字段和一个分类分组字段，再点击“重新选择字段并分析”。时间字段为可选。";
+  dom.v2FieldPrompt.textContent = "请选择一个数值指标字段和一个分类分组字段，再点击“生成自定义分析”。时间字段为可选。";
 }
 
 function renderV2Analysis() {
@@ -2410,6 +2510,9 @@ function resetAnalysisState() {
   state.insights = [];
   state.customAnalysis = null;
 
+  document.body.classList.remove("has-results");
+  setReportExportStatus("");
+
   dom.sourceName.textContent = "";
   dom.sourceName.removeAttribute("title");
   dom.overviewCards.innerHTML = "";
@@ -2841,6 +2944,7 @@ function updateExportButtons() {
     button.disabled = disabled;
     button.setAttribute("aria-disabled", String(disabled));
   });
+  updateWorkflowSteps();
 }
 
 function exportHtmlReport() {
@@ -2855,8 +2959,10 @@ function exportAnalysisReport(format) {
   if (!canExportReport()) {
     if (state.rows.length && hasFieldConfigDraftChanges()) {
       ensureFieldConfigurationApplied("导出报告");
+      setReportExportStatus("字段配置有未应用的修改，请先应用配置后再导出。", "warning");
     } else {
       setStatus("请先完成数据分析，再导出报告。", "warning");
+      setReportExportStatus("请先完成数据分析，再导出报告。", "warning");
     }
     updateExportButtons();
     return;
@@ -2869,6 +2975,7 @@ function exportAnalysisReport(format) {
   });
   const activeButton = format === "md" ? dom.exportMarkdownReport : dom.exportHtmlReport;
   if (activeButton) activeButton.textContent = "正在导出...";
+  setReportExportStatus(`正在生成${format === "html" ? " HTML" : " Markdown"}报告...`, "loading");
 
   try {
     const exportedAt = new Date();
@@ -2883,8 +2990,10 @@ function exportAnalysisReport(format) {
       : "text/markdown;charset=utf-8";
     downloadReportFile(content, fileName, mimeType);
     setStatus(`${format === "html" ? "HTML" : "Markdown"} 报告已生成：${fileName}`, "success");
+    setReportExportStatus(`报告已生成：${fileName}`, "success");
   } catch (error) {
     setStatus(`报告导出失败：${error.message}`, "error");
+    setReportExportStatus(`报告导出失败：${error.message}`, "error");
   } finally {
     buttons.forEach((button, index) => {
       button.textContent = labels[index];
@@ -3355,7 +3464,7 @@ function buildHtmlReport(reportData, chartImages = []) {
       ? `<ol class="insights">${reportData.insights.map((insight) => `<li>${escapeHtml(insight)}</li>`).join("")}</ol>`
       : `<p class="empty">暂无自动分析结论。</p>`}
   </section>
-  <footer>由 Smart CSV Analyzer ${escapeHtml(reportData.version)} 在浏览器本地生成；数据未上传。</footer>
+  <footer>由 Smart Tabular Analyzer ${escapeHtml(reportData.version)} 在浏览器本地生成；数据未上传。</footer>
 </main>
 </body>
 </html>`;
@@ -3502,7 +3611,7 @@ function buildMarkdownReport(reportData) {
   } else {
     lines.push("暂无自动分析结论。");
   }
-  lines.push("", `> 由 Smart CSV Analyzer ${escapeMarkdownText(reportData.version)} 在浏览器本地生成；数据未上传。`, "");
+  lines.push("", `> 由 Smart Tabular Analyzer ${escapeMarkdownText(reportData.version)} 在浏览器本地生成；数据未上传。`, "");
   return lines.join("\n");
 }
 
@@ -3577,12 +3686,24 @@ function escapeHtml(value) {
 function setStatus(message, tone = "") {
   dom.statusPanel.className = `status-panel${tone ? ` ${tone}` : ""}`;
   dom.statusPanel.textContent = message;
+  dom.statusPanel.setAttribute("role", tone === "error" ? "alert" : "status");
+  dom.statusPanel.setAttribute("aria-busy", String(!tone));
+  setImportBusy(!tone);
 }
 
 function showError(message, importId = state.activeImportId) {
   if (!isCurrentImport(importId)) return;
   resetAnalysisState();
+  setImportBusy(false);
   dom.statusPanel.className = "status-panel error";
   dom.statusPanel.textContent = message;
+  dom.statusPanel.setAttribute("role", "alert");
+  dom.statusPanel.setAttribute("aria-busy", "false");
   dom.results.classList.add("hidden");
+}
+
+function setReportExportStatus(message, tone = "") {
+  if (!dom.reportExportStatus) return;
+  dom.reportExportStatus.className = `inline-status${tone ? ` ${tone}` : ""}`;
+  dom.reportExportStatus.textContent = message;
 }

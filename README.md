@@ -16,6 +16,16 @@ Smart Tabular Analyzer is a browser-based CSV and Excel data analysis tool for q
 
 The project is built as a static website and does not require a backend service, database, account system, or build step.
 
+## Screenshots
+
+### Upload Workspace
+
+![Smart Tabular Analyzer upload workspace](./assets/homepage.png)
+
+### Analysis Workspace
+
+![Smart Tabular Analyzer analysis workspace](./assets/analysis-results.png)
+
 ## Features
 
 - Upload and parse CSV files in the browser.

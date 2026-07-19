@@ -16,6 +16,16 @@ Smart Tabular Analyzer（智能表格数据分析工具）是一个纯前端 CSV
 
 该项目是静态网站，不依赖后端服务、数据库、账号系统或构建流程，适合部署到 GitHub Pages 等静态托管平台。
 
+## 项目截图
+
+### 首页与数据上传
+
+![Smart Tabular Analyzer 首页与数据上传](./assets/homepage.png)
+
+### 数据分析工作区
+
+![Smart Tabular Analyzer 数据分析工作区](./assets/analysis-results.png)
+
 ## 项目简介
 
 CSV 文件经常来自不同系统或业务场景，字段结构并不固定。Smart Tabular Analyzer 通过自动识别字段类型和生成基础分析结果，帮助用户快速了解数据规模、字段结构、缺失情况、重复行、异常值、分类分布和时间趋势。

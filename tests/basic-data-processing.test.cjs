@@ -61,7 +61,7 @@ test("Excel worksheet arrays become rows with Chinese fields", () => {
 
   assert.deepEqual(result.fields, ["订单编号", "地区", "销售额"]);
   assert.deepEqual(result.rows, [
-    { 订单编号: "A-001", 地区: "华东", 销售额: "1,200" }
+    { 订单编号: "A-001", 地区: "华东", 销售额: "1200" }
   ]);
 
   const emptyMessage = evaluate(`(() => {

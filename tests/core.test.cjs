@@ -18,6 +18,13 @@ assert.match(
   /https:\/\/cdn\.sheetjs\.com\/xlsx-0\.20\.3\/package\/dist\/xlsx\.full\.min\.js/
 );
 assert.doesNotMatch(htmlSource, /xlsx@0\.18\.5|xlsx-0\.18\.5/);
+const externalScripts = [...htmlSource.matchAll(/<script\s+[^>]*src="https:\/\/[^>]+><\/script>/g)]
+  .map((match) => match[0]);
+assert.equal(externalScripts.length, 3);
+externalScripts.forEach((tag) => {
+  assert.match(tag, /integrity="sha384-[A-Za-z0-9+/=]+"/);
+  assert.match(tag, /crossorigin="anonymous"/);
+});
 
 const localAssetReferences = [...htmlSource.matchAll(/(?:src|href)="([^"]+)"/g)]
   .map((match) => match[1])
@@ -203,10 +210,17 @@ const excelData = evaluate(`JSON.stringify(buildExcelTabularData(
 assert.deepEqual(JSON.parse(excelData), {
   fields: ["订单编号", "地区", "销售额"],
   rows: [
-    { 订单编号: "A-001", 地区: "华东", 销售额: "1,200" },
+    { 订单编号: "A-001", 地区: "华东", 销售额: "1200" },
     { 订单编号: "A-002", 地区: "华南", 销售额: "980" }
   ]
 });
+
+const excelPrecisionResult = JSON.parse(evaluate(`JSON.stringify(buildExcelTabularData(
+  [["精确值"], ["1.23"]],
+  [["精确值"], [1.23456789]],
+  "精度测试"
+).rows)`));
+assert.deepEqual(excelPrecisionResult, [{ 精确值: "1.23456789" }]);
 
 const excelRawDateResult = JSON.parse(evaluate(`JSON.stringify((() => {
   const data = buildExcelTabularData(
@@ -300,16 +314,14 @@ const csvProtoResult = JSON.parse(evaluate(`JSON.stringify((() => {
     fields: state.fields,
     own: Object.prototype.hasOwnProperty.call(row, "__proto__"),
     value: row["__proto__"],
-    normal: row["普通字段"],
-    typeOverrideKeys: Object.keys(state.typeOverrides)
+    normal: row["普通字段"]
   };
 })())`));
 assert.deepEqual(csvProtoResult, {
   fields: ["__proto__", "普通字段"],
   own: true,
   value: "csv-value",
-  normal: "normal-value",
-  typeOverrideKeys: []
+  normal: "normal-value"
 });
 
 const firstImport = evaluate("beginImport()");
@@ -317,11 +329,31 @@ const secondImport = evaluate("beginImport()");
 assert.equal(evaluate(`isCurrentImport(${firstImport})`), false);
 assert.equal(evaluate(`isCurrentImport(${secondImport})`), true);
 
+context.FileReader = { LOADING: 1 };
+context.__activeReader = {
+  readyState: 1,
+  aborted: false,
+  abort() { this.aborted = true; }
+};
+evaluate("state.activeFileReader = __activeReader");
+evaluate("beginImport()");
+assert.equal(context.__activeReader.aborted, true);
+assert.equal(evaluate("state.activeFileReader"), null);
+
+context.Papa = {
+  WORKERS_SUPPORTED: true,
+  parse(_text, config) { context.__workerConfig = config; }
+};
+context.window.Papa = context.Papa;
+evaluate('parseCsvText("字段\\n值", "worker.csv", beginImport())');
+assert.equal(context.__workerConfig.worker, true);
+
+const oneColumnImport = evaluate("beginImport()");
 evaluate(`handleParsedData({
   errors: [{type: "Delimiter", code: "UndetectableDelimiter", message: "bad delimiter"}],
   meta: {fields: ["字段"]},
   data: [{"字段": "1"}]
-}, "one-column.csv", ${secondImport})`);
+}, "one-column.csv", ${oneColumnImport})`);
 assert.equal(evaluate("state.rows.length"), 1);
 assert.equal(evaluate("state.fields.length"), 1);
 assert.equal(evaluate("state.parseWarnings.length"), 0);
@@ -338,6 +370,16 @@ evaluate(`handleParsedData({
 }, "broken.csv", ${malformedImport})`);
 assert.equal(evaluate("state.rows.length"), 0);
 assert.equal(elements.get("statusPanel").className, "status-panel error");
+
+const extraFieldImport = evaluate("beginImport()");
+evaluate(`handleParsedData({
+  errors: [{type: "FieldMismatch", code: "TooManyFields", message: "extra value", row: 0}],
+  meta: {fields: ["字段"]},
+  data: [{"字段": "保留", "__parsed_extra": ["不应丢弃"]}]
+}, "extra-field.csv", ${extraFieldImport})`);
+assert.equal(evaluate("state.rows.length"), 0);
+assert.equal(elements.get("statusPanel").className, "status-panel error");
+assert.match(elements.get("statusPanel").textContent, /数据列多于表头/);
 
 const duplicateHeaderImport = evaluate("beginImport()");
 evaluate(`handleParsedData({
@@ -423,7 +465,7 @@ assert.equal(
   })
 );
 assert.equal(evaluate('state.categoryStats.some((item) => item.field === "备注")'), false);
-assert.equal(evaluate('getActiveFields().includes("备注")'), false);
+assert.equal(evaluate('getActiveProfiles().some((item) => item.field === "备注")'), false);
 assert.equal(evaluate('buildTemplateFieldOptions({required:true, expected:"numeric"}).includes("金额")'), true);
 assert.equal(evaluate('buildTemplateFieldOptions({required:true, expected:"any"}).includes("备注")'), false);
 assert.equal(evaluate("JSON.stringify(state.rows)"), originalRows);
@@ -432,7 +474,6 @@ evaluate("restoreAutomaticFieldTypes()");
 assert.equal(evaluate('state.profiles.find((item) => item.field === "金额").typeKey'), "category");
 assert.equal(evaluate('state.profiles.find((item) => item.field === "下单日期").typeKey'), "category");
 assert.equal(evaluate('state.profiles.find((item) => item.field === "备注").typeKey'), "category");
-assert.equal(evaluate("Object.keys(state.typeOverrides).length"), 0);
 assert.equal(evaluate("state.numericStats.length"), 0);
 
 evaluate('stageFieldTypeChange("渠道", "numeric")');
@@ -591,6 +632,9 @@ evaluate('state.sourceFileName = "客户:销售?.xlsx"');
 const markdownFileName = evaluate('buildReportFileName("md", new Date(2026, 6, 17, 14, 30, 5))');
 assert.match(markdownFileName, /20260717.*143005.*\.md$/);
 assert.doesNotMatch(markdownFileName, /[<>:"/\\|?*]/);
+evaluate('state.sourceFileName = "report\\u202Egnp.exe.csv"');
+const bidiSafeFileName = evaluate('buildDataExportFileName("filtered", new Date(2026, 6, 17))');
+assert.doesNotMatch(bidiSafeFileName, /[\u202A-\u202E\u2066-\u2069]/);
 evaluate('state.sourceFileName = "销售 数据.xlsx"');
 
 assert.equal(evaluate("canExportReport()"), true);

@@ -30,7 +30,7 @@ The project is built as a static website and does not require a backend service,
 
 - Upload and parse CSV files in the browser.
 - Import `.xlsx` and `.xls` workbooks with SheetJS. Single-sheet files enter analysis directly; multi-sheet files show a worksheet selector first.
-- Protect browser responsiveness with an import limit of 25 MB, 100,000 data rows, and 200 columns.
+- Reduce large-file responsiveness and memory risks with an import limit of 25 MB, 100,000 data rows, and 200 columns. CSV parsing uses a Web Worker when supported by the browser.
 - Select CSV file encoding manually, including Auto Detect, UTF-8, GBK, and GB18030.
 - Preview the first 10 rows of the dataset.
 - Automatically identify numeric, categorical, date, and ID fields, with semantic handling for student/record identifiers and year columns.
@@ -47,7 +47,7 @@ The project is built as a static website and does not require a backend service,
 - Support custom analysis by selecting a numeric metric, a categorical grouping field, and an optional date field.
 - Provide scenario templates for general data, sales data, student scores, used product prices, surveys, and user behavior logs.
 - Generate cautious, data-based insights without assuming external business context.
-- Export the current filtered rows or the original dataset with complete duplicate rows removed as CSV. Data exports preserve the original field order and include a UTF-8 BOM for Excel compatibility.
+- Export the current filtered rows or the original dataset with complete duplicate rows removed as CSV. Data exports preserve the original field order, neutralize spreadsheet-formula prefixes, and include a UTF-8 BOM for Excel compatibility.
 - Export the completed analysis as an HTML or Markdown report. Both formats include source metadata, field types, data quality, statistics, trends, custom grouping results, and automatic insights.
 - Preserve the currently rendered charts inside a self-contained HTML report that can be opened offline.
 - Support responsive layouts for desktop and mobile screens.
@@ -76,6 +76,8 @@ External libraries are loaded through CDN links in `index.html`.
 │   ├── data-processing.test.cjs
 │   ├── basic-data-processing.test.cjs
 │   ├── core.test.cjs
+│   ├── destructive-qa.test.cjs
+│   ├── create-excel-fixture.mjs
 │   ├── test-context.cjs
 │   └── fixtures/
 ├── sample-data.csv
@@ -216,7 +218,9 @@ The **Export Data** section provides two browser-local CSV downloads:
 - **Filtered CSV:** exports the current `filteredRows` result. When no filter is active, it contains all imported rows.
 - **Deduplicated CSV:** removes complete duplicate rows from the original imported dataset across all original fields and retains the first occurrence of each row. Comparison uses exact original cell values, so leading or trailing spaces remain significant. This export is independent of the current filters.
 
-Both exports preserve the original column order and cell values. Files are generated with comma delimiters, CRLF line endings, and a UTF-8 BOM so that Chinese headers and values open correctly in Excel and WPS. File names follow `original_filtered_YYYYMMDD.csv` or `original_deduplicated_YYYYMMDD.csv`, for example `sales_filtered_20260718.csv`.
+Both exports preserve the original column order and imported cell values. To prevent spreadsheet formula injection, text beginning with executable formula tokens such as `=`, `@`, or a non-numeric `+` / `-` expression is prefixed with an apostrophe in the exported CSV. Files use comma delimiters, CRLF line endings, and a UTF-8 BOM so that Chinese headers and values open correctly in Excel and WPS. File names follow `original_filtered_YYYYMMDD.csv` or `original_deduplicated_YYYYMMDD.csv`, for example `sales_filtered_20260718.csv`.
+
+Excel numeric cells are analyzed from their raw workbook values instead of rounded display strings. Date cells are normalized to `YYYY-MM-DD`; other imported values are converted to their textual CSV representation without modifying the source workbook.
 
 Exporting creates a new browser download. It does not modify or overwrite the uploaded CSV or Excel file, and no source rows are sent to a server.
 
@@ -255,11 +259,12 @@ Downloaded files use the original file base name plus the local export date and 
 
 All CSV and Excel parsing, filtering, processed data export, analysis, and report export run locally in the browser. The application does not upload data files or generated reports to a server, store user files, or send dataset contents to a third-party API.
 
-The page loads PapaParse, Chart.js, and SheetJS from CDN providers. When the page loads these external scripts, the browser may request resources from the CDN host, but uploaded data files remain local to the browser runtime.
+The page loads pinned PapaParse, Chart.js, and SheetJS files from CDN providers and verifies them with Subresource Integrity (SRI). When the page loads these external scripts, the browser may request resources from the CDN host, but uploaded data files remain local to the browser runtime.
 
 ## Known Limitations
 
-- Each import is limited to 25 MB, 100,000 data rows, and 200 columns to protect browser responsiveness. Files above these limits must be split before import.
+- Each import is limited to 25 MB, 100,000 data rows, and 200 columns to bound browser-side processing. Files above these limits must be split before import.
+- CSV parsing uses a worker where available, but Excel parsing and subsequent analysis still run locally and may temporarily use significant memory near the import limits, especially on mobile devices.
 - Date parsing uses strict format validation. Ambiguous month/day cells require a consistent order inferred from other unambiguous cells in the same column; conflicting evidence leaves those ambiguous cells unconverted and reports them in the field configuration table.
 - Excel analysis expects the first non-empty row of the selected worksheet to contain unique, non-empty text headers. Headerless, empty, protected, or structurally irregular worksheets may be rejected with an error.
 - Field type detection is based on heuristic rules and may require manual confirmation for ambiguous columns.

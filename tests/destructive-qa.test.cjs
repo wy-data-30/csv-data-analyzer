@@ -237,6 +237,17 @@ test("CSV export preserves Chinese, emoji, commas, quotes and UTF-8 BOM", async 
   const bytes = new Uint8Array(await blob.arrayBuffer());
   assert.deepEqual(Array.from(bytes.slice(0, 3)), [0xef, 0xbb, 0xbf]);
   assert.equal(new TextDecoder("utf-8").decode(bytes.slice(3)), csv);
+
+  assert.equal(evaluate('sanitizeCsvExportValue("=1+1")'), "'=1+1");
+  assert.equal(evaluate('sanitizeCsvExportValue("@SUM(A1:A2)")'), "'@SUM(A1:A2)");
+  assert.equal(evaluate('sanitizeCsvExportValue("-42")'), "-42");
+  assert.equal(evaluate('sanitizeCsvExportValue("12$34")'), "12$34");
+  context.__qaFormulaRows = [{ note: '=HYPERLINK("https://example.invalid", "open")' }];
+  context.__qaFormulaFields = ["note"];
+  assert.equal(
+    evaluate("buildCsvExportContent(__qaFormulaRows, __qaFormulaFields)"),
+    'note\r\n"\'=HYPERLINK(""https://example.invalid"", ""open"")"'
+  );
 });
 
 test("100,000-row analysis and combined filtering complete with correct results", (testContext) => {

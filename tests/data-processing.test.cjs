@@ -45,6 +45,9 @@ test("numeric parsing handles common tabular formats safely", () => {
   assert.equal(evaluate('toNumber("1e308")'), 1e308);
   assert.equal(evaluate('toNumber("5e-324")'), 5e-324);
   assert.equal(evaluate('toNumber("1e309")'), null);
+  assert.equal(evaluate('toNumber("12$34")'), null);
+  assert.equal(evaluate('toNumber("1,23")'), null);
+  assert.equal(evaluate('toNumber("1 234.50")'), 1234.5);
   assert.equal(evaluate('toNumber(42)'), 42);
   assert.equal(evaluate('toNumber("")'), null);
   assert.equal(evaluate('toNumber("not-a-number")'), null);
@@ -238,6 +241,23 @@ test("IQR detection handles an extreme outlier without numeric overflow", () => 
   assert.equal(stats.max, 1_000_000_000);
   assert.equal(Number.isFinite(stats.mean), true);
   assert.equal(Number.isFinite(stats.std), true);
+});
+
+test("extreme finite values do not crash histograms or overflow grouped sums", () => {
+  const { context, evaluate } = createScriptContext();
+  context.__extremeValues = [-1e308, 1e308];
+  context.__overflowValues = [1e308, 1e308];
+
+  assert.equal(
+    evaluate("buildHistogram(__extremeValues, 10).reduce((total, bin) => total + bin.count, 0)"),
+    2
+  );
+  assert.equal(evaluate("sumNumbers(__extremeValues)"), 0);
+  assert.equal(evaluate("sumNumbers(__overflowValues)"), null);
+  assert.equal(
+    evaluate('summarizeGroupedValues(new Map([["A", __overflowValues]]))[0].sum'),
+    null
+  );
 });
 
 test("categorical filtering supports one or multiple selected values", () => {

@@ -10,9 +10,9 @@ const state = {
   duplicateRows: 0,
   totalMissing: 0,
   parseWarnings: [],
-  typeOverrides: Object.create(null),
   fieldTypeDrafts: Object.create(null),
   pendingExcel: null,
+  activeFileReader: null,
   activeImportId: 0,
   charts: {},
   sourceFileName: "",
@@ -482,7 +482,7 @@ async function parseCsvFile(file) {
     assertRuntimeDependency("Papa", "CSV 解析组件加载失败，请检查网络连接后刷新页面重试。");
     const selectedEncoding = dom.fileEncoding.value || "auto";
     setStatus(`正在读取 ${file.name} ...`);
-    const buffer = await readFileAsArrayBuffer(file);
+    const buffer = await readFileAsArrayBuffer(file, importId);
     if (!isCurrentImport(importId)) return;
     const decoded = decodeCsvBuffer(buffer, selectedEncoding);
     setStatus(`正在解析 ${file.name}（${decoded.label}）...`);
@@ -509,7 +509,7 @@ async function parseExcelFile(file) {
   try {
     assertRuntimeDependency("XLSX", "Excel 解析组件加载失败，请检查网络连接后刷新页面重试。");
     setStatus(`正在读取 ${file.name} ...`);
-    const buffer = await readFileAsArrayBuffer(file);
+    const buffer = await readFileAsArrayBuffer(file, importId);
     if (!isCurrentImport(importId)) return;
     setStatus(`正在解析 ${file.name} ...`);
     validateExcelFileSignature(buffer, file.name);
@@ -582,20 +582,13 @@ function importExcelSheet(workbook, fileName, sheetName, importId) {
 
   validateExcelWorksheetLimits(worksheet, sheetName);
 
-  const formattedRows = XLSX.utils.sheet_to_json(worksheet, {
-    header: 1,
-    defval: "",
-    raw: false,
-    blankrows: true,
-    dateNF: "yyyy-mm-dd"
-  });
   const rawRows = XLSX.utils.sheet_to_json(worksheet, {
     header: 1,
     defval: "",
     raw: true,
     blankrows: true
   });
-  const { fields, rows } = buildExcelTabularData(formattedRows, rawRows, sheetName);
+  const { fields, rows } = buildExcelTabularData(rawRows, rawRows, sheetName);
 
   state.pendingExcel = null;
   dom.sheetSelectionPanel.classList.add("hidden");
@@ -662,12 +655,10 @@ function buildExcelTabularData(formattedRows, rawRows, sheetName = "当前工作
     .filter((pair) => usedColumnIndexes.some((columnIndex) => !isMissing(pair.formatted[columnIndex]) || !isMissing(pair.raw[columnIndex])))
     .map((pair) => fields.reduce((row, field, fieldIndex) => {
       const columnIndex = usedColumnIndexes[fieldIndex];
-      const rawValue = pair.raw[columnIndex];
-      const normalizedDateValue = isDateObject(rawValue)
-        ? normalizeExcelDateValue(rawValue)
-        : null;
-      const value = normalizedDateValue ?? pair.formatted[columnIndex];
-      row[field] = value === null || value === undefined ? "" : String(value);
+      row[field] = normalizeExcelCellValue(
+        pair.formatted[columnIndex],
+        pair.raw[columnIndex]
+      );
       return row;
     }, Object.create(null)));
 
@@ -685,6 +676,18 @@ function excelRowHasValue(row) {
 function normalizeExcelDateValue(value) {
   const date = toDate(value);
   return date ? date.toISOString().slice(0, 10) : null;
+}
+
+function normalizeExcelCellValue(formattedValue, rawValue) {
+  if (isDateObject(rawValue)) {
+    return normalizeExcelDateValue(rawValue) || "";
+  }
+  if (["string", "number", "boolean", "bigint"].includes(typeof rawValue)) {
+    return String(rawValue);
+  }
+  return formattedValue === null || formattedValue === undefined
+    ? ""
+    : String(formattedValue);
 }
 
 function validateExcelFileSignature(buffer, fileName) {
@@ -735,6 +738,7 @@ function parseCsvText(text, sourceName, importId = beginImport()) {
     header: true,
     skipEmptyLines: true,
     preview: IMPORT_LIMITS.maxRows + 1,
+    worker: Boolean(Papa.WORKERS_SUPPORTED),
     transformHeader: encodeCsvHeaderForParser,
     complete: (results) => handleParsedData(results, sourceName, importId),
     error: (error) => showError(error.message, importId)
@@ -761,6 +765,7 @@ function decodeCsvHeaderFromParser(header) {
 
 function beginImport() {
   state.activeImportId += 1;
+  abortActiveFileRead();
   resetAnalysisState();
   setImportBusy(true);
   return state.activeImportId;
@@ -774,15 +779,37 @@ function assertRuntimeDependency(globalName, message) {
   if (!window[globalName]) throw new Error(message);
 }
 
-function readFileAsArrayBuffer(file) {
-  if (typeof file.arrayBuffer === "function") {
+function abortActiveFileRead() {
+  const reader = state.activeFileReader;
+  state.activeFileReader = null;
+  if (reader && reader.readyState === 1 && typeof reader.abort === "function") reader.abort();
+}
+
+function readFileAsArrayBuffer(file, importId = state.activeImportId) {
+  if (typeof FileReader === "undefined" && typeof file.arrayBuffer === "function") {
     return file.arrayBuffer();
   }
 
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error || new Error("文件读取失败"));
+    state.activeFileReader = reader;
+    const clearReader = () => {
+      if (state.activeFileReader === reader && isCurrentImport(importId)) {
+        state.activeFileReader = null;
+      }
+    };
+    reader.onload = () => {
+      clearReader();
+      resolve(reader.result);
+    };
+    reader.onerror = () => {
+      clearReader();
+      reject(reader.error || new Error("文件读取失败"));
+    };
+    reader.onabort = () => {
+      clearReader();
+      reject(new Error("文件读取已取消"));
+    };
     reader.readAsArrayBuffer(file);
   });
 }
@@ -840,6 +867,12 @@ function decodeText(buffer, encoding, fatal = false) {
 function handleParsedData(results, sourceName, importId) {
   if (!isCurrentImport(importId)) return;
   const parseErrors = Array.isArray(results.errors) ? results.errors : [];
+  const extraFieldError = parseErrors.find((error) => error.code === "TooManyFields");
+  if (extraFieldError) {
+    const rowNumber = Number.isInteger(extraFieldError.row) ? extraFieldError.row + 2 : null;
+    showError(`CSV${rowNumber ? ` 第 ${rowNumber} 行` : ""}的数据列多于表头，继续分析会丢失额外单元格。请补全表头或修正该行后重试。`, importId);
+    return;
+  }
   const fatalError = parseErrors.find((error) =>
     error.code === "MissingQuotes"
     || (error.type === "Delimiter" && error.code !== "UndetectableDelimiter")
@@ -889,12 +922,13 @@ function handleParsedData(results, sourceName, importId) {
       code: error.code || "ParseWarning",
       message: error.message || "CSV 行结构异常"
     }));
-  const normalizedRows = sourceRows.map((row) =>
-    normalizeParsedRow(row, fieldPairs)
-  );
-  const rows = normalizedRows.filter((row) =>
-    fields.some((field) => !isMissing(row[field]))
-  );
+  const rows = sourceRows.reduce((normalizedRows, row) => {
+    const normalized = normalizeParsedRow(row, fieldPairs);
+    if (fields.some((field) => !isMissing(normalized[field]))) {
+      normalizedRows.push(normalized);
+    }
+    return normalizedRows;
+  }, []);
 
   if (!fields.length || !rows.length) {
     showError("CSV 中没有可分析的数据。请确认文件包含表头和至少一行数据。", importId);
@@ -931,7 +965,6 @@ function commitTabularData(fields, rows, sourceName, importId, parseWarnings = [
   state.categoryFilterOptions = [];
   state.categoryFilterDraftValues = new Set();
   state.profiles = fields.map((field) => buildColumnProfile(field, rows));
-  state.typeOverrides = Object.create(null);
   state.fieldTypeDrafts = Object.fromEntries(
     state.profiles.map((profile) => [profile.field, profile.inferredTypeKey])
   );
@@ -1347,13 +1380,11 @@ function updateSchemaDraftRow(field, typeKey) {
 
 function applyFieldConfiguration() {
   if (!state.rows.length) return;
-  state.typeOverrides = Object.create(null);
   state.profiles.forEach((profile) => {
     const typeKey = getDraftTypeKey(profile);
     profile.typeKey = typeKey;
     profile.type = FIELD_TYPE_LABELS[typeKey];
     profile.conversionFailureCount = countFieldConversionFailures(profile.field, typeKey);
-    if (typeKey !== profile.inferredTypeKey) state.typeOverrides[profile.field] = typeKey;
   });
   state.fieldTypeDrafts = Object.fromEntries(
     state.profiles.map((profile) => [profile.field, profile.typeKey])
@@ -1368,7 +1399,6 @@ function applyFieldConfiguration() {
 
 function restoreAutomaticFieldTypes() {
   if (!state.rows.length) return;
-  state.typeOverrides = Object.create(null);
   state.profiles.forEach((profile) => {
     profile.typeKey = profile.inferredTypeKey;
     profile.type = profile.inferredType;
@@ -2122,14 +2152,16 @@ function renderV2SummaryCards(metricField, groupField, aggregateMethod, dateFiel
 }
 
 function renderV2AggregationTables(metricField, groupField, grouped) {
-  const bySum = [...grouped].sort((a, b) => b.sum - a.sum);
-  const byAvg = [...grouped].sort((a, b) => b.avg - a.avg);
+  const bySum = [...grouped].sort((a, b) => compareNumbersDescending(a.sum, b.sum));
+  const byAvg = [...grouped].sort((a, b) => compareNumbersDescending(a.avg, b.avg));
   dom.v2SumTable.innerHTML = buildV2AggregationTableHtml(groupField, metricField, bySum, "sum");
   dom.v2AvgTable.innerHTML = buildV2AggregationTableHtml(groupField, metricField, byAvg, "avg");
 }
 
 function renderV2PrimaryTable(metricField, groupField, grouped, aggregateMethod) {
-  const sorted = [...grouped].sort((a, b) => b[aggregateMethod] - a[aggregateMethod]);
+  const sorted = [...grouped].sort((a, b) => (
+    compareNumbersDescending(a[aggregateMethod], b[aggregateMethod])
+  ));
   const aggregateLabel = getAggregateMethodLabel(aggregateMethod);
   dom.v2PrimaryTableTitle.textContent = `${metricField} 按 ${groupField} 分组（${aggregateLabel}）`;
   dom.v2PrimaryTable.innerHTML = buildV2AggregationTableHtml(groupField, metricField, sorted, aggregateMethod);
@@ -2161,7 +2193,9 @@ function renderV2TopGroupChart(metricField, groupField, grouped, aggregateMethod
   const canvas = document.getElementById("v2TopGroupChart");
   if (!window.Chart) return drawEmptyChart(canvas, "图表组件加载失败，请检查网络连接");
   const aggregateLabel = getAggregateMethodLabel(aggregateMethod);
-  const topGroups = [...grouped].sort((a, b) => b[aggregateMethod] - a[aggregateMethod]).slice(0, 10);
+  const topGroups = [...grouped]
+    .sort((a, b) => compareNumbersDescending(a[aggregateMethod], b[aggregateMethod]))
+    .slice(0, 10);
   dom.v2TopGroupTitle.textContent = `${metricField} 按 ${groupField} 分组 Top 10（${aggregateLabel}）`;
   canvas.setAttribute("aria-label", dom.v2TopGroupTitle.textContent);
   state.charts.v2TopGroupChart = new Chart(canvas, {
@@ -2388,8 +2422,9 @@ function analyzeGenericTemplate(mappings) {
   const grouped = groupNumericFieldByCategory(mappings.metric, mappings.group);
   const values = getNumericValues(mappings.metric);
   const stats = summarizeNumbers(values);
-  const topBySum = grouped[0];
-  const topByAvg = [...grouped].sort((a, b) => b.avg - a.avg)[0];
+  const topBySum = grouped.find((item) => Number.isFinite(item.sum));
+  const topByAvg = [...grouped]
+    .sort((a, b) => compareNumbersDescending(a.avg, b.avg))[0];
   const trend = mappings.date ? buildTrendFromRows(mappings.date, (row) => toNumber(row[mappings.metric]), "sum") : null;
   const insights = [
     `本次通用分析使用「${mappings.metric}」作为数值指标、「${mappings.group}」作为分组维度，有效数值记录为 ${formatInteger(values.length)} 条。`,
@@ -2425,8 +2460,12 @@ function analyzeSalesTemplate(mappings) {
     : frequencyRows(mappings.region);
   const metricLabel = metricRows ? metricRows.label : "记录数";
   const metricFormatField = metricRows?.formatField || "";
-  const categoryTop = categoryRows[0];
-  const regionTop = regionRows[0];
+  const categoryTop = metricRows
+    ? categoryRows.find((item) => Number.isFinite(item.sum))
+    : categoryRows[0];
+  const regionTop = metricRows
+    ? regionRows.find((item) => Number.isFinite(item.sum))
+    : regionRows[0];
   const trend = mappings.date
     ? buildTrendFromRows(mappings.date, metricRows ? (row) => getSalesMetricValue(row, mappings) : null, metricRows ? "sum" : "count")
     : null;
@@ -2658,7 +2697,9 @@ function getSalesMetricValue(row, mappings) {
   if (mappings.unitPrice && mappings.quantity) {
     const price = toNumber(row[mappings.unitPrice]);
     const quantity = toNumber(row[mappings.quantity]);
-    return price === null || quantity === null ? null : price * quantity;
+    if (price === null || quantity === null) return null;
+    const product = price * quantity;
+    return Number.isFinite(product) ? product : null;
   }
   if (mappings.unitPrice) return toNumber(row[mappings.unitPrice]);
   if (mappings.quantity) return toNumber(row[mappings.quantity]);
@@ -2694,14 +2735,14 @@ function summarizeGroupedValues(groups) {
       return {
         name,
         count: values.length,
-        sum: values.reduce((total, value) => total + value, 0),
+        sum: sumNumbers(values),
         avg: mean(values),
         median: median(values),
         min,
         max
       };
     })
-    .sort((a, b) => b.sum - a.sum);
+    .sort((a, b) => compareNumbersDescending(a.sum, b.sum));
 }
 
 function buildTrendFromRows(dateField, valueGetter, aggregate) {
@@ -2733,7 +2774,7 @@ function buildTrendFromRows(dateField, valueGetter, aggregate) {
     const bucket = groups.get(label);
     if (aggregate === "avg") return bucket.length ? mean(bucket) : 0;
     if (aggregate === "median") return bucket.length ? median(bucket) : 0;
-    return bucket.reduce((sum, value) => sum + value, 0);
+    return sumNumbers(bucket);
   });
   return { labels, values };
 }
@@ -2743,6 +2784,9 @@ function buildTrendFactText(metricLabel, dateField, trend, valueLabel) {
   if (trend.labels.length === 1) return `日期字段「${dateField}」只有 1 个有效时间点，无法判断变化方向。`;
   const first = trend.values[0];
   const last = trend.values[trend.values.length - 1];
+  if (!Number.isFinite(first) || !Number.isFinite(last)) {
+    return `按日期字段「${dateField}」观察时，聚合结果超出浏览器可表示的有限数值范围，无法可靠判断变化方向。`;
+  }
   const direction = last > first ? "上升" : last < first ? "下降" : "基本持平";
   return `按日期字段「${dateField}」观察，「${metricLabel}」${valueLabel}从 ${trend.labels[0]} 到 ${trend.labels[trend.labels.length - 1]} 呈${direction}变化；这只是时间序列数值变化，不说明原因。`;
 }
@@ -2858,11 +2902,17 @@ function topUserRows(field) {
 }
 
 function topLabels(rows, valueKey = "sum") {
-  return [...rows].sort((a, b) => (b[valueKey] ?? 0) - (a[valueKey] ?? 0)).slice(0, 10).map((item) => item.name);
+  return [...rows]
+    .sort((a, b) => compareNumbersDescending(a[valueKey], b[valueKey]))
+    .slice(0, 10)
+    .map((item) => item.name);
 }
 
 function topValues(rows, valueKey) {
-  return [...rows].sort((a, b) => (b[valueKey] ?? 0) - (a[valueKey] ?? 0)).slice(0, 10).map((item) => item[valueKey] ?? 0);
+  return [...rows]
+    .sort((a, b) => compareNumbersDescending(a[valueKey], b[valueKey]))
+    .slice(0, 10)
+    .map((item) => Number.isFinite(item[valueKey]) ? item[valueKey] : null);
 }
 
 function barChartConfig(title, labels, values, label, axisLabel, color, valueField = "") {
@@ -2987,20 +3037,30 @@ function aggregateByCategory(metricField, groupField, method) {
       let value = 0;
       if (method === "avg") value = mean(values);
       else if (method === "median") value = median(values);
-      else value = values.reduce((sum, item) => sum + item, 0);
+      else value = sumNumbers(values);
       return { name, value, count: values.length };
     })
-    .sort((a, b) => b.value - a.value);
+    .sort((a, b) => compareNumbersDescending(a.value, b.value));
 }
 
 function buildHistogram(values, binCount, field = "") {
   if (!values.length) return [];
   const { min, max } = numericExtents(values);
   if (min === max) return [{ label: formatFieldNumber(field, min), count: values.length }];
-  const width = (max - min) / binCount;
+  const scale = Math.max(Math.abs(min), Math.abs(max));
+  const normalizedMin = min / scale;
+  const normalizedMax = max / scale;
+  const normalizedWidth = (normalizedMax - normalizedMin) / binCount;
+  if (!Number.isFinite(normalizedWidth) || normalizedWidth <= 0) {
+    return [{ label: `${formatFieldNumber(field, min)} - ${formatFieldNumber(field, max)}`, count: values.length }];
+  }
   const bins = Array.from({ length: binCount }, (_, index) => {
-    const start = min + index * width;
-    const end = index === binCount - 1 ? max : start + width;
+    const startRatio = index / binCount;
+    const endRatio = (index + 1) / binCount;
+    const start = min * (1 - startRatio) + max * startRatio;
+    const end = index === binCount - 1
+      ? max
+      : min * (1 - endRatio) + max * endRatio;
     return {
       start,
       end,
@@ -3009,7 +3069,9 @@ function buildHistogram(values, binCount, field = "") {
     };
   });
   values.forEach((value) => {
-    const index = Math.min(Math.floor((value - min) / width), binCount - 1);
+    const normalizedValue = value / scale;
+    const rawIndex = Math.floor((normalizedValue - normalizedMin) / normalizedWidth);
+    const index = Math.max(0, Math.min(rawIndex, binCount - 1));
     bins[index].count += 1;
   });
   return bins;
@@ -3086,7 +3148,6 @@ function resetAnalysisState() {
   state.duplicateRows = 0;
   state.totalMissing = 0;
   state.parseWarnings = [];
-  state.typeOverrides = Object.create(null);
   state.fieldTypeDrafts = Object.create(null);
   state.pendingExcel = null;
   state.sourceFileName = "";
@@ -3231,10 +3292,6 @@ function getProfilesByType(typeKey) {
 
 function getActiveProfiles() {
   return state.profiles.filter((profile) => profile.typeKey !== "ignore");
-}
-
-function getActiveFields() {
-  return getActiveProfiles().map((profile) => profile.field);
 }
 
 function getFieldProfile(field) {
@@ -3402,10 +3459,30 @@ function toNumber(value) {
   const raw = String(value).trim();
   if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(raw)) return null;
   const isAccountingNegative = /^\(.*\)$/.test(raw);
-  const unsigned = isAccountingNegative ? raw.slice(1, -1) : raw;
-  const isPercent = /%$/.test(unsigned);
-  const cleaned = unsigned.replace(/[$￥¥€£,\s]/g, "").replace(/%$/, "");
-  if (!/^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/.test(cleaned)) return null;
+  let numericText = (isAccountingNegative ? raw.slice(1, -1) : raw).trim();
+  const isPercent = /%$/.test(numericText);
+  if (isPercent) numericText = numericText.slice(0, -1).trim();
+
+  const currencyMatches = numericText.match(/[$￥¥€£]/g) || [];
+  if (currencyMatches.length > 1) return null;
+  if (currencyMatches.length === 1) {
+    const currencyIndex = numericText.search(/[$￥¥€£]/);
+    const beforeCurrency = numericText.slice(0, currencyIndex).trim();
+    const afterCurrency = numericText.slice(currencyIndex + 1).trim();
+    const validPrefix = beforeCurrency === "" || /^[+-]$/.test(beforeCurrency);
+    const validSuffix = afterCurrency === "";
+    if (!validPrefix && !validSuffix) return null;
+    numericText = `${beforeCurrency}${afterCurrency}`;
+  }
+
+  const plainNumberPattern = /^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/;
+  const commaGroupedPattern = /^[-+]?\d{1,3}(?:,\d{3})+(?:\.\d+)?(?:[eE][-+]?\d+)?$/;
+  const spaceGroupedPattern = /^[-+]?\d{1,3}(?:[ \u00a0]\d{3})+(?:\.\d+)?(?:[eE][-+]?\d+)?$/;
+  let cleaned = numericText;
+  if (commaGroupedPattern.test(numericText)) cleaned = numericText.replaceAll(",", "");
+  else if (spaceGroupedPattern.test(numericText)) cleaned = numericText.replace(/[ \u00a0]/g, "");
+  else if (!plainNumberPattern.test(numericText)) return null;
+
   let parsed = Number(cleaned);
   if (!Number.isFinite(parsed)) return null;
   if (isAccountingNegative) parsed = -Math.abs(parsed);
@@ -3484,6 +3561,24 @@ function mean(values) {
   if (scale === 0) return 0;
   const normalizedTotal = values.reduce((sum, value) => sum + value / scale, 0);
   return (normalizedTotal / values.length) * scale;
+}
+
+function sumNumbers(values) {
+  if (!values.length) return 0;
+  const scale = values.reduce((max, value) => Math.max(max, Math.abs(value)), 0);
+  if (scale === 0) return 0;
+  const normalizedTotal = values.reduce((sum, value) => sum + value / scale, 0);
+  const result = normalizedTotal * scale;
+  return Number.isFinite(result) ? result : null;
+}
+
+function compareNumbersDescending(left, right) {
+  const leftIsFinite = Number.isFinite(left);
+  const rightIsFinite = Number.isFinite(right);
+  if (leftIsFinite && rightIsFinite) return right - left;
+  if (leftIsFinite) return -1;
+  if (rightIsFinite) return 1;
+  return 0;
 }
 
 function median(values) {
@@ -3665,16 +3760,29 @@ function buildCsvExportContent(rows, fields) {
   if (!window.Papa || typeof window.Papa.unparse !== "function") {
     throw new Error("CSV 导出组件未加载，请检查网络连接后刷新页面重试。");
   }
-  const orderedFields = [...fields];
-  const data = rows.map((row) => orderedFields.map((field) => (
+  const sourceFields = [...fields];
+  const orderedFields = sourceFields.map(sanitizeCsvExportValue);
+  const data = rows.map((row) => sourceFields.map((field) => (
     Object.prototype.hasOwnProperty.call(row, field) && row[field] !== null && row[field] !== undefined
-      ? row[field]
+      ? sanitizeCsvExportValue(row[field])
       : ""
   )));
   return window.Papa.unparse(
     { fields: orderedFields, data },
     { header: true, newline: "\r\n", skipEmptyLines: false }
   );
+}
+
+function sanitizeCsvExportValue(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  const text = String(value);
+  const candidate = text.replace(/^[ \t\r]+/, "");
+  const startsWithControl = /^[\t\r]/.test(text);
+  const startsWithFormulaToken = /^[=+\-@]/.test(candidate);
+  if (!startsWithControl && !startsWithFormulaToken) return value;
+  if (/^[+\-]/.test(candidate) && toNumber(candidate) !== null) return value;
+  return `'${text}`;
 }
 
 function exportHtmlReport() {
@@ -3978,6 +4086,9 @@ function summarizeCustomTrend(dateField, metricField, trend, aggregateMethod = "
   }
   const first = trend.values[0];
   const last = trend.values[trend.values.length - 1];
+  if (!Number.isFinite(first) || !Number.isFinite(last)) {
+    return `按「${dateField}」观察时，「${metricField}」的聚合结果超出浏览器可表示的有限数值范围，无法可靠判断趋势。`;
+  }
   const direction = trend.values.length < 2
     ? "仅有一个时间点"
     : last > first ? "整体上升" : last < first ? "整体下降" : "整体持平";
@@ -4433,6 +4544,7 @@ function padReportNumber(value) {
 function sanitizeFileName(value) {
   return String(value || "data-report")
     .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "-")
+    .replace(/[\u202A-\u202E\u2066-\u2069]/g, "")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 80) || "data-report";

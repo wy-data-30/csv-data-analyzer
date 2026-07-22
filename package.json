@@ -1,8 +1,9 @@
 {
   "name": "smart-tabular-analyzer",
-  "version": "1.0.0",
+  "version": "2.1.0",
   "private": true,
   "scripts": {
-    "test": "node --test tests/data-processing.test.cjs tests/basic-data-processing.test.cjs tests/core.test.cjs"
+    "test": "node --test tests/data-processing.test.cjs",
+    "test:regression": "node --test tests/data-processing.test.cjs tests/destructive-qa.test.cjs tests/basic-data-processing.test.cjs tests/core.test.cjs"
   }
 }

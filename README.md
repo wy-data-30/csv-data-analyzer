@@ -1,6 +1,6 @@
 # Smart Tabular Analyzer
 
-**Current version:** V2.3
+**Current version:** V2.1
 
 **Chinese name:** 智能表格数据分析工具
 
@@ -30,6 +30,7 @@ The project is built as a static website and does not require a backend service,
 
 - Upload and parse CSV files in the browser.
 - Import `.xlsx` and `.xls` workbooks with SheetJS. Single-sheet files enter analysis directly; multi-sheet files show a worksheet selector first.
+- Protect browser responsiveness with an import limit of 25 MB, 100,000 data rows, and 200 columns.
 - Select CSV file encoding manually, including Auto Detect, UTF-8, GBK, and GB18030.
 - Preview the first 10 rows of the dataset.
 - Automatically identify numeric, categorical, date, and ID fields, with semantic handling for student/record identifiers and year columns.
@@ -108,31 +109,25 @@ Using a local static server is recommended because some browsers restrict `fetch
 
 ## Running Tests
 
-The automated test suite requires Node.js 18 or later. It uses only the Node.js built-in test runner, so no dependency installation is required. Run it from the project root:
+The automated test suite requires Node.js 18 or later and uses only the built-in `node:test` runner. No test dependency installation is required. The default release gate is:
 
 ```bash
 npm test
 ```
 
-If `npm` is unavailable, run the same full suite directly with Node.js:
+This command runs the focused core data-processing suite. It covers numeric, percentage, currency and date parsing; field and ID inference; missing and duplicate rows; descriptive statistics; IQR outliers; filters; deduplication; Chinese fields; and boundary datasets. It intentionally does not assert CSS implementation details.
 
-```bash
-node --test tests/data-processing.test.cjs tests/basic-data-processing.test.cjs tests/core.test.cjs
-```
-
-Run only the focused pure data-processing tests with:
+Run the same core suite directly when `npm` is unavailable:
 
 ```bash
 node --test tests/data-processing.test.cjs
 ```
 
-You can also run the original full regression script directly:
+Run the broader import, export, report, and HTML integration regression suite with:
 
 ```bash
-node tests/core.test.cjs
+npm run test:regression
 ```
-
-The focused suite covers numeric parsing, field type inference, missing values, complete-row duplicate detection, mean, median, population standard deviation, IQR outliers, categorical filters, numeric ranges, date ranges, combined filters, and clearing filters. The full suite also covers CSV encoding and normalized parsing, Excel worksheet conversion, Chinese fields, processed CSV export, UTF-8 BOM output, empty input, single-column data, and datasets without numeric or categorical fields.
 
 ## Usage
 
@@ -202,7 +197,7 @@ Field detection is heuristic. Users can correct inferred types in the field conf
 
 - Missing values: empty strings, `null`, `undefined`, and whitespace-only values are treated as missing.
 - Missing rate: calculated as missing values divided by total row count for each column.
-- Duplicate rows: detected by comparing normalized values across all fields in each row.
+- Duplicate rows: detected by comparing the exact original values across all fields in each row. Leading or trailing spaces remain significant.
 - Numeric outliers: detected with the IQR method. Values below `Q1 - 1.5 * IQR` or above `Q3 + 1.5 * IQR` are marked as outliers.
 - Empty input handling: CSV files and Excel worksheets without a usable header row or valid data rows show a clear error message and do not keep stale analysis results on screen.
 
@@ -219,7 +214,7 @@ Field detection is heuristic. Users can correct inferred types in the field conf
 The **Export Data** section provides two browser-local CSV downloads:
 
 - **Filtered CSV:** exports the current `filteredRows` result. When no filter is active, it contains all imported rows.
-- **Deduplicated CSV:** removes complete duplicate rows from the original imported dataset across all original fields and retains the first occurrence of each row. This export is independent of the current filters.
+- **Deduplicated CSV:** removes complete duplicate rows from the original imported dataset across all original fields and retains the first occurrence of each row. Comparison uses exact original cell values, so leading or trailing spaces remain significant. This export is independent of the current filters.
 
 Both exports preserve the original column order and cell values. Files are generated with comma delimiters, CRLF line endings, and a UTF-8 BOM so that Chinese headers and values open correctly in Excel and WPS. File names follow `original_filtered_YYYYMMDD.csv` or `original_deduplicated_YYYYMMDD.csv`, for example `sales_filtered_20260718.csv`.
 
@@ -227,7 +222,7 @@ Exporting creates a new browser download. It does not modify or overwrite the up
 
 ## Report Export
 
-V2.3 can download the current analysis as either a standalone HTML file or a Markdown file. Report generation and download happen entirely in the browser; source rows and report contents are never uploaded.
+V2.1 can download the current analysis as either a standalone HTML file or a Markdown file. Report generation and download happen entirely in the browser; source rows and report contents are never uploaded.
 
 Both formats include:
 
@@ -264,7 +259,7 @@ The page loads PapaParse, Chart.js, and SheetJS from CDN providers. When the pag
 
 ## Known Limitations
 
-- Large CSV or Excel files are limited by browser memory and single-page runtime performance.
+- Each import is limited to 25 MB, 100,000 data rows, and 200 columns to protect browser responsiveness. Files above these limits must be split before import.
 - Date parsing uses strict format validation. Ambiguous month/day cells require a consistent order inferred from other unambiguous cells in the same column; conflicting evidence leaves those ambiguous cells unconverted and reports them in the field configuration table.
 - Excel analysis expects the first non-empty row of the selected worksheet to contain unique, non-empty text headers. Headerless, empty, protected, or structurally irregular worksheets may be rejected with an error.
 - Field type detection is based on heuristic rules and may require manual confirmation for ambiguous columns.

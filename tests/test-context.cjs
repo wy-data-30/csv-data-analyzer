@@ -28,6 +28,7 @@ class FakeElement {
   }
 
   addEventListener() {}
+  appendChild(child) { this.options.push(child); return child; }
   focus() {}
   removeAttribute() {}
   scrollIntoView() {}

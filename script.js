@@ -142,6 +142,12 @@ const ENCODING_LABELS = {
   gb18030: "GB18030"
 };
 
+const IMPORT_LIMITS = Object.freeze({
+  maxFileSizeBytes: 25 * 1024 * 1024,
+  maxRows: 100000,
+  maxColumns: 200
+});
+
 const FIELD_TYPE_LABELS = {
   numeric: "数值",
   category: "分类",
@@ -487,6 +493,11 @@ async function parseCsvFile(file) {
 }
 
 function parseDataFile(file) {
+  if (Number.isFinite(file?.size) && file.size > IMPORT_LIMITS.maxFileSizeBytes) {
+    const importId = beginImport();
+    showError(`文件大小超过 ${formatImportLimitSize(IMPORT_LIMITS.maxFileSizeBytes)}，请拆分文件后重试。`, importId);
+    return;
+  }
   if (/\.csv$/i.test(file.name)) return parseCsvFile(file);
   if (/\.(xlsx|xls)$/i.test(file.name)) return parseExcelFile(file);
   const importId = beginImport();
@@ -569,6 +580,8 @@ function importExcelSheet(workbook, fileName, sheetName, importId) {
     throw new Error(`工作表「${sheetName}」为空，请选择包含表头和数据的工作表。`);
   }
 
+  validateExcelWorksheetLimits(worksheet, sheetName);
+
   const formattedRows = XLSX.utils.sheet_to_json(worksheet, {
     header: 1,
     defval: "",
@@ -608,6 +621,10 @@ function buildExcelTabularData(formattedRows, rawRows, sheetName = "当前工作
     throw new Error(`工作表「${sheetName}」为空，请选择包含表头和数据的工作表。`);
   }
 
+  if (rowPairs.length - 1 > IMPORT_LIMITS.maxRows) {
+    throw new Error(`工作表「${sheetName}」超过 ${formatInteger(IMPORT_LIMITS.maxRows)} 行数据限制，请拆分后重试。`);
+  }
+
   const headerPair = rowPairs[0];
   const dataPairs = rowPairs.slice(1);
   const maxColumns = rowPairs.reduce((max, pair) => Math.max(max, pair.formatted.length, pair.raw.length), 0);
@@ -615,6 +632,10 @@ function buildExcelTabularData(formattedRows, rawRows, sheetName = "当前工作
     !isMissing(headerPair.formatted[columnIndex])
       || dataPairs.some((pair) => !isMissing(pair.formatted[columnIndex]) || !isMissing(pair.raw[columnIndex]))
   );
+
+  if (usedColumnIndexes.length > IMPORT_LIMITS.maxColumns) {
+    throw new Error(`工作表「${sheetName}」超过 ${formatInteger(IMPORT_LIMITS.maxColumns)} 列限制，请减少字段后重试。`);
+  }
 
   if (!usedColumnIndexes.length) {
     throw new Error(`工作表「${sheetName}」为空，请选择包含表头和数据的工作表。`);
@@ -684,6 +705,24 @@ function validateExcelFileSignature(buffer, fileName) {
   }
 }
 
+function validateExcelWorksheetLimits(worksheet, sheetName) {
+  let range;
+  try {
+    range = XLSX.utils.decode_range(worksheet["!ref"]);
+  } catch {
+    throw new Error(`工作表「${sheetName}」的使用区域无效，无法解析。`);
+  }
+
+  const dataRowCount = range.e.r - range.s.r;
+  const columnCount = range.e.c - range.s.c + 1;
+  if (dataRowCount > IMPORT_LIMITS.maxRows) {
+    throw new Error(`工作表「${sheetName}」超过 ${formatInteger(IMPORT_LIMITS.maxRows)} 行数据限制，请拆分后重试。`);
+  }
+  if (columnCount > IMPORT_LIMITS.maxColumns) {
+    throw new Error(`工作表「${sheetName}」超过 ${formatInteger(IMPORT_LIMITS.maxColumns)} 列限制，请减少字段后重试。`);
+  }
+}
+
 function showSheetSelectionError(message) {
   dom.sheetSelectionMessage.className = "sheet-selection-message error";
   dom.sheetSelectionMessage.textContent = message;
@@ -695,6 +734,7 @@ function parseCsvText(text, sourceName, importId = beginImport()) {
   Papa.parse(text, {
     header: true,
     skipEmptyLines: true,
+    preview: IMPORT_LIMITS.maxRows + 1,
     transformHeader: encodeCsvHeaderForParser,
     complete: (results) => handleParsedData(results, sourceName, importId),
     error: (error) => showError(error.message, importId)
@@ -813,6 +853,10 @@ function handleParsedData(results, sourceName, importId) {
     raw: rawField,
     clean: normalizeFieldName(decodeCsvHeaderFromParser(rawField))
   }));
+  if (allFieldPairs.length > IMPORT_LIMITS.maxColumns) {
+    showError(`CSV 超过 ${formatInteger(IMPORT_LIMITS.maxColumns)} 列限制，请减少字段后重试。`, importId);
+    return;
+  }
   const fieldPairs = allFieldPairs.filter((pair) => pair.clean !== "");
   const fields = fieldPairs.map((pair) => pair.clean);
   const duplicateFields = [...new Set(
@@ -825,6 +869,10 @@ function handleParsedData(results, sourceName, importId) {
   }
 
   const sourceRows = Array.isArray(results.data) ? results.data : [];
+  if (sourceRows.length > IMPORT_LIMITS.maxRows) {
+    showError(`CSV 超过 ${formatInteger(IMPORT_LIMITS.maxRows)} 行数据限制，请拆分文件后重试。`, importId);
+    return;
+  }
   const blankHeaderHasData = allFieldPairs
     .filter((pair) => pair.clean === "")
     .some((pair) => sourceRows.some((row) => !isMissing(row?.[pair.raw])));
@@ -860,6 +908,10 @@ function commitTabularData(fields, rows, sourceName, importId, parseWarnings = [
   if (!isCurrentImport(importId)) return;
   if (!fields.length || !rows.length) {
     showError("文件中没有可分析的数据。请确认数据包含表头和至少一行数据。", importId);
+    return;
+  }
+  if (fields.length > IMPORT_LIMITS.maxColumns || rows.length > IMPORT_LIMITS.maxRows) {
+    showError(`数据超过 ${formatInteger(IMPORT_LIMITS.maxRows)} 行或 ${formatInteger(IMPORT_LIMITS.maxColumns)} 列限制，请拆分后重试。`, importId);
     return;
   }
 
@@ -2410,16 +2462,27 @@ function analyzeSalesTemplate(mappings) {
 function analyzeScoreTemplate(mappings) {
   const values = getNumericValues(mappings.score);
   const stats = summarizeNumbers(values);
-  const dimension = mappings.class || mappings.subject || "";
-  const grouped = dimension ? groupNumericFieldByCategory(mappings.score, dimension) : [];
-  const topAvg = grouped.length ? [...grouped].sort((a, b) => b.avg - a.avg)[0] : null;
-  const lowAvg = grouped.length ? [...grouped].sort((a, b) => a.avg - b.avg)[0] : null;
+  const dimensionResults = [...new Set([mappings.class, mappings.subject].filter(Boolean))]
+    .map((field) => ({ field, rows: groupNumericFieldByCategory(mappings.score, field) }));
+  const primaryDimension = dimensionResults[0];
+  const secondaryDimension = dimensionResults[1];
   const trend = mappings.examDate ? buildTrendFromRows(mappings.examDate, (row) => toNumber(row[mappings.score]), "avg") : null;
   const insights = [
     `成绩模板使用「${mappings.score}」作为成绩字段，有效成绩记录为 ${formatInteger(values.length)} 条。`,
-    `成绩平均值为 ${formatFieldNumber(mappings.score, stats.mean)}，中位数为 ${formatFieldNumber(mappings.score, stats.median)}，最低值为 ${formatFieldNumber(mappings.score, stats.min)}，最高值为 ${formatFieldNumber(mappings.score, stats.max)}。`,
-    topAvg && lowAvg ? `按「${dimension}」分组时，平均值最高的是「${topAvg.name}」(${formatFieldNumber(mappings.score, topAvg.avg)})，平均值最低的是「${lowAvg.name}」(${formatFieldNumber(mappings.score, lowAvg.avg)})。这里只描述字段结果，不评价教学或个体原因。` : "未选择班级或科目字段，因此未生成分组平均值比较。"
+    `成绩平均值为 ${formatFieldNumber(mappings.score, stats.mean)}，中位数为 ${formatFieldNumber(mappings.score, stats.median)}，最低值为 ${formatFieldNumber(mappings.score, stats.min)}，最高值为 ${formatFieldNumber(mappings.score, stats.max)}。`
   ];
+  if (!dimensionResults.length) {
+    insights.push("未选择班级或科目字段，因此未生成分组平均值比较。");
+  } else {
+    dimensionResults.forEach(({ field, rows }) => {
+      const sorted = [...rows].sort((a, b) => b.avg - a.avg);
+      const topAvg = sorted[0];
+      const lowAvg = sorted[sorted.length - 1];
+      insights.push(topAvg && lowAvg
+        ? `按「${field}」分组时，平均值最高的是「${topAvg.name}」(${formatFieldNumber(mappings.score, topAvg.avg)})，平均值最低的是「${lowAvg.name}」(${formatFieldNumber(mappings.score, lowAvg.avg)})。这里只描述字段结果，不评价教学或个体原因。`
+        : `字段「${field}」没有形成可比较的成绩分组。`);
+    });
+  }
   if (trend) insights.push(buildTrendFactText(mappings.score, mappings.examDate, trend, "平均值"));
 
   return {
@@ -2431,11 +2494,13 @@ function analyzeScoreTemplate(mappings) {
       ["平均值", formatFieldNumber(mappings.score, stats.mean)]
     ],
     insights,
-    table: dimension ? numericGroupTable(dimension, mappings.score, grouped) : simpleStatsTable(mappings.score, stats, values.length),
-    mainChart: dimension
-      ? barChartConfig(`按 ${dimension} 的成绩平均值 Top 10`, topLabels(grouped, "avg"), topValues(grouped, "avg"), "成绩平均值", "平均值", CHART_THEME.primary, mappings.score)
+    table: dimensionResults.length ? multiDimensionNumericTable(mappings.score, dimensionResults) : simpleStatsTable(mappings.score, stats, values.length),
+    mainChart: primaryDimension
+      ? barChartConfig(`按 ${primaryDimension.field} 的成绩平均值 Top 10`, topLabels(primaryDimension.rows, "avg"), topValues(primaryDimension.rows, "avg"), "成绩平均值", "平均值", CHART_THEME.primary, mappings.score)
       : histogramChartConfig(`${mappings.score} 分布`, values, "记录数", mappings.score),
-    secondaryChart: histogramChartConfig(`${mappings.score} 分布`, values, "记录数", mappings.score),
+    secondaryChart: secondaryDimension
+      ? barChartConfig(`按 ${secondaryDimension.field} 的成绩平均值 Top 10`, topLabels(secondaryDimension.rows, "avg"), topValues(secondaryDimension.rows, "avg"), "成绩平均值", "平均值", CHART_THEME.secondary, mappings.score)
+      : histogramChartConfig(`${mappings.score} 分布`, values, "记录数", mappings.score),
     trendChart: trend ? lineChartConfig(`${mappings.score} 时间趋势`, trend.labels, trend.values, "成绩平均值", "平均值", mappings.score) : null
   };
 }
@@ -2443,16 +2508,25 @@ function analyzeScoreTemplate(mappings) {
 function analyzeUsedGoodsTemplate(mappings) {
   const values = getNumericValues(mappings.price);
   const stats = summarizeNumbers(values);
-  const dimensions = ["item", "platform", "city", "condition"].map((key) => mappings[key]).filter(Boolean);
-  const primaryDimension = dimensions[0];
-  const grouped = primaryDimension ? groupNumericFieldByCategory(mappings.price, primaryDimension) : [];
-  const topAvg = [...grouped].sort((a, b) => b.avg - a.avg)[0];
+  const dimensionResults = [...new Set(["item", "platform", "city", "condition"].map((key) => mappings[key]).filter(Boolean))]
+    .map((field) => ({ field, rows: groupNumericFieldByCategory(mappings.price, field) }));
+  const primaryDimension = dimensionResults[0];
+  const secondaryDimension = dimensionResults[1];
   const trend = mappings.date ? buildTrendFromRows(mappings.date, (row) => toNumber(row[mappings.price]), "avg") : null;
   const insights = [
     `二手商品价格模板使用「${mappings.price}」作为价格字段，有效价格记录为 ${formatInteger(values.length)} 条。`,
-    `价格平均值为 ${formatFieldNumber(mappings.price, stats.mean)}，中位数为 ${formatFieldNumber(mappings.price, stats.median)}，最低值为 ${formatFieldNumber(mappings.price, stats.min)}，最高值为 ${formatFieldNumber(mappings.price, stats.max)}。`,
-    topAvg ? `按「${primaryDimension}」比较，平均价格最高的分组是「${topAvg.name}」，平均值为 ${formatFieldNumber(mappings.price, topAvg.avg)}。该结果只说明样本中的价格差异，不代表市场整体水平。` : "未选择商品、平台、城市或成色字段，因此仅生成价格整体统计。"
+    `价格平均值为 ${formatFieldNumber(mappings.price, stats.mean)}，中位数为 ${formatFieldNumber(mappings.price, stats.median)}，最低值为 ${formatFieldNumber(mappings.price, stats.min)}，最高值为 ${formatFieldNumber(mappings.price, stats.max)}。`
   ];
+  if (!dimensionResults.length) {
+    insights.push("未选择商品、平台、城市或成色字段，因此仅生成价格整体统计。");
+  } else {
+    dimensionResults.forEach(({ field, rows }) => {
+      const topAvg = [...rows].sort((a, b) => b.avg - a.avg)[0];
+      insights.push(topAvg
+        ? `按「${field}」比较，平均价格最高的分组是「${topAvg.name}」，平均值为 ${formatFieldNumber(mappings.price, topAvg.avg)}。该结果只说明样本中的价格差异，不代表市场整体水平。`
+        : `字段「${field}」没有形成可比较的价格分组。`);
+    });
+  }
   if (trend) insights.push(buildTrendFactText(mappings.price, mappings.date, trend, "平均值"));
 
   return {
@@ -2460,15 +2534,17 @@ function analyzeUsedGoodsTemplate(mappings) {
     cards: [
       ["模板", "二手商品价格分析"],
       ["价格字段", mappings.price],
-      ["比较维度", primaryDimension || "未选择"],
+      ["比较维度", dimensionResults.length ? formatInteger(dimensionResults.length) : "未选择"],
       ["价格中位数", formatFieldNumber(mappings.price, stats.median)]
     ],
     insights,
-    table: primaryDimension ? numericGroupTable(primaryDimension, mappings.price, grouped) : simpleStatsTable(mappings.price, stats, values.length),
+    table: dimensionResults.length ? multiDimensionNumericTable(mappings.price, dimensionResults) : simpleStatsTable(mappings.price, stats, values.length),
     mainChart: primaryDimension
-      ? barChartConfig(`按 ${primaryDimension} 的平均价格 Top 10`, topLabels(grouped, "avg"), topValues(grouped, "avg"), "平均价格", "平均值", CHART_THEME.primary, mappings.price)
+      ? barChartConfig(`按 ${primaryDimension.field} 的平均价格 Top 10`, topLabels(primaryDimension.rows, "avg"), topValues(primaryDimension.rows, "avg"), "平均价格", "平均值", CHART_THEME.primary, mappings.price)
       : histogramChartConfig(`${mappings.price} 分布`, values, "记录数", mappings.price),
-    secondaryChart: histogramChartConfig(`${mappings.price} 分布`, values, "记录数", mappings.price),
+    secondaryChart: secondaryDimension
+      ? barChartConfig(`按 ${secondaryDimension.field} 的平均价格 Top 10`, topLabels(secondaryDimension.rows, "avg"), topValues(secondaryDimension.rows, "avg"), "平均价格", "平均值", CHART_THEME.secondary, mappings.price)
+      : histogramChartConfig(`${mappings.price} 分布`, values, "记录数", mappings.price),
     trendChart: trend ? lineChartConfig(`${mappings.price} 时间趋势`, trend.labels, trend.values, "平均价格", "平均值", mappings.price) : null
   };
 }
@@ -2520,17 +2596,19 @@ function analyzeBehaviorTemplate(mappings) {
   const userCounts = countNonMissingValues(mappings.userId);
   const uniqueUsers = new Set(getAnalysisRows().map((row) => displayValue(row[mappings.userId])).filter(Boolean)).size;
   const avgEventsPerUser = uniqueUsers ? userCounts / uniqueUsers : 0;
-  const secondaryField = mappings.channel || mappings.device || "";
-  const secondaryRows = secondaryField ? frequencyRows(secondaryField) : topUserRows(mappings.userId);
+  const secondaryResults = [...new Set([mappings.channel, mappings.device].filter(Boolean))]
+    .map((field) => ({ field, rows: frequencyRows(field) }));
+  const primarySecondary = secondaryResults[0];
+  const secondaryRows = primarySecondary ? primarySecondary.rows : topUserRows(mappings.userId);
   const trend = mappings.date ? buildTrendFromRows(mappings.date, null, "count") : null;
   const insights = [
     `用户行为模板使用「${mappings.userId}」作为用户 ID、「${mappings.event}」作为事件字段，有效事件记录为 ${formatInteger(userCounts)} 条。`,
     `唯一用户数为 ${formatInteger(uniqueUsers)}，平均每个用户对应 ${formatNumber(avgEventsPerUser)} 条事件记录。`,
     eventRows[0] ? `事件字段中出现最多的是「${eventRows[0].name}」，出现 ${formatInteger(eventRows[0].count)} 次，占比 ${formatPercent(eventRows[0].ratio)}。该结果不推断用户动机。` : "事件字段没有可统计的有效类别。"
   ];
-  if (secondaryField && secondaryRows[0]) {
-    insights.push(`辅助维度「${secondaryField}」中记录数最高的是「${secondaryRows[0].name}」，出现 ${formatInteger(secondaryRows[0].count)} 次。`);
-  }
+  secondaryResults.forEach(({ field, rows }) => {
+    if (rows[0]) insights.push(`辅助维度「${field}」中记录数最高的是「${rows[0].name}」，出现 ${formatInteger(rows[0].count)} 次。`);
+  });
   if (trend) insights.push(buildTrendFactText("事件记录数", mappings.date, trend, "记录数"));
 
   return {
@@ -2542,9 +2620,9 @@ function analyzeBehaviorTemplate(mappings) {
       ["人均事件", formatNumber(avgEventsPerUser)]
     ],
     insights,
-    table: frequencyTable(mappings.event, eventRows),
+    table: multiFieldFrequencyTable([{ field: mappings.event, rows: eventRows }, ...secondaryResults]),
     mainChart: barChartConfig(`${mappings.event} Top 10`, topLabels(eventRows), topValues(eventRows, "count"), "事件数", "记录数", CHART_THEME.primary),
-    secondaryChart: barChartConfig(`${secondaryField || mappings.userId} Top 10`, topLabels(secondaryRows), topValues(secondaryRows, "count"), "记录数", "记录数", CHART_THEME.secondary),
+    secondaryChart: barChartConfig(`${primarySecondary?.field || mappings.userId} Top 10`, topLabels(secondaryRows), topValues(secondaryRows, "count"), "记录数", "记录数", CHART_THEME.secondary),
     trendChart: trend ? lineChartConfig("事件记录时间趋势", trend.labels, trend.values, "记录数", "记录数") : null
   };
 }
@@ -2697,10 +2775,37 @@ function numericGroupTable(groupField, metricField, rows, formatField = metricFi
   };
 }
 
+function multiDimensionNumericTable(metricField, dimensionResults) {
+  return {
+    headers: ["维度字段", "分组值", "记录数", `${metricField} 求和`, `${metricField} 平均值`, "最小值", "最大值"],
+    rows: dimensionResults.flatMap(({ field, rows }) => rows.map((row) => [
+      field,
+      row.name,
+      formatInteger(row.count),
+      formatFieldNumber(metricField, row.sum),
+      formatFieldNumber(metricField, row.avg),
+      formatFieldNumber(metricField, row.min),
+      formatFieldNumber(metricField, row.max)
+    ]))
+  };
+}
+
 function frequencyTable(field, rows) {
   return {
     headers: [field, "记录数", "占比"],
     rows: rows.map((row) => [row.name, formatInteger(row.count), formatPercent(row.ratio)])
+  };
+}
+
+function multiFieldFrequencyTable(fieldResults) {
+  return {
+    headers: ["字段", "类别", "记录数", "占比"],
+    rows: fieldResults.flatMap(({ field, rows }) => rows.map((row) => [
+      field,
+      row.name,
+      formatInteger(row.count),
+      formatPercent(row.ratio)
+    ]))
   };
 }
 
@@ -3077,7 +3182,7 @@ function countDuplicateRows(rows, fields) {
   const seen = new Set();
   let duplicates = 0;
   rows.forEach((row) => {
-    const key = JSON.stringify(fields.map((field) => normalizeValue(row[field])));
+    const key = buildExactRowKey(row, fields);
     if (seen.has(key)) duplicates += 1;
     else seen.add(key);
   });
@@ -3087,11 +3192,21 @@ function countDuplicateRows(rows, fields) {
 function deduplicateRows(rows, fields) {
   const seen = new Set();
   return rows.filter((row) => {
-    const key = JSON.stringify(fields.map((field) => normalizeValue(row[field])));
+    const key = buildExactRowKey(row, fields);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+}
+
+function buildExactRowKey(row, fields) {
+  return JSON.stringify(fields.map((field) => {
+    if (!Object.prototype.hasOwnProperty.call(row, field)) return ["absent"];
+    const value = row[field];
+    if (value === undefined) return ["undefined"];
+    if (value === null) return ["null"];
+    return [typeof value, String(value)];
+  }));
 }
 
 function countValues(field, rows = getAnalysisRows()) {
@@ -3290,7 +3405,7 @@ function toNumber(value) {
   const unsigned = isAccountingNegative ? raw.slice(1, -1) : raw;
   const isPercent = /%$/.test(unsigned);
   const cleaned = unsigned.replace(/[$￥¥€£,\s]/g, "").replace(/%$/, "");
-  if (!/^[-+]?(?:\d+\.?\d*|\.\d+)$/.test(cleaned)) return null;
+  if (!/^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/.test(cleaned)) return null;
   let parsed = Number(cleaned);
   if (!Number.isFinite(parsed)) return null;
   if (isAccountingNegative) parsed = -Math.abs(parsed);
@@ -3365,20 +3480,33 @@ function buildUtcDate(year, month, day) {
 
 function mean(values) {
   if (!values.length) return 0;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
+  const scale = values.reduce((max, value) => Math.max(max, Math.abs(value)), 0);
+  if (scale === 0) return 0;
+  const normalizedTotal = values.reduce((sum, value) => sum + value / scale, 0);
+  return (normalizedTotal / values.length) * scale;
 }
 
 function median(values) {
   if (!values.length) return 0;
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+  if (sorted.length % 2) return sorted[middle];
+  const lower = sorted[middle - 1];
+  const upper = sorted[middle];
+  const sum = lower + upper;
+  return Number.isFinite(sum) ? sum / 2 : lower / 2 + upper / 2;
 }
 
 function standardDeviation(values, avg = mean(values)) {
   if (!values.length) return 0;
-  const variance = values.reduce((sum, value) => sum + Math.pow(value - avg, 2), 0) / values.length;
-  return Math.sqrt(variance);
+  const scale = values.reduce((max, value) => Math.max(max, Math.abs(value)), Math.abs(avg));
+  if (scale === 0) return 0;
+  const normalizedAverage = avg / scale;
+  const variance = values.reduce((sum, value) => {
+    const difference = value / scale - normalizedAverage;
+    return sum + difference * difference;
+  }, 0) / values.length;
+  return Math.sqrt(variance) * scale;
 }
 
 function quantile(sortedValues, q) {
@@ -3387,7 +3515,7 @@ function quantile(sortedValues, q) {
   const base = Math.floor(position);
   const rest = position - base;
   if (sortedValues[base + 1] !== undefined) {
-    return sortedValues[base] + rest * (sortedValues[base + 1] - sortedValues[base]);
+    return sortedValues[base] * (1 - rest) + sortedValues[base + 1] * rest;
   }
   return sortedValues[base];
 }
@@ -3403,6 +3531,10 @@ function formatInteger(value) {
   return new Intl.NumberFormat("zh-CN", {
     maximumFractionDigits: 0
   }).format(value || 0);
+}
+
+function formatImportLimitSize(bytes) {
+  return `${Math.round(bytes / (1024 * 1024))} MB`;
 }
 
 function formatPercent(value) {
@@ -3694,7 +3826,7 @@ function buildReportData(now = new Date()) {
   }));
 
   return {
-    version: "V2.3",
+    version: "V2.1",
     fileName: getReportSourceFileName(),
     sheetName: state.sourceSheetName || "",
     sourceType: state.sourceType || (state.sourceSheetName ? "excel" : "csv"),
@@ -3857,7 +3989,7 @@ function normalizeReportSnapshot(reportData = {}) {
   const dataScale = reportData.dataScale || {};
   return {
     ...reportData,
-    version: reportData.version || "V2.3",
+    version: reportData.version || "V2.1",
     fileName: reportData.fileName || "data-report",
     sheetName: reportData.sheetName || "",
     analysisTime: reportData.analysisTime || "—",

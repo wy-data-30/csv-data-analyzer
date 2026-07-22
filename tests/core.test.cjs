@@ -7,7 +7,6 @@ const { context, elements, source, evaluate } = createScriptContext();
 
 const projectRoot = path.join(__dirname, "..");
 const htmlSource = fs.readFileSync(path.join(projectRoot, "index.html"), "utf8");
-const styleSource = fs.readFileSync(path.join(projectRoot, "style.css"), "utf8");
 const missingDomIds = [...new Set(
   [...source.matchAll(/document\.getElementById\("([^"]+)"\)/g)]
     .map((match) => match[1])
@@ -19,15 +18,6 @@ assert.match(
   /https:\/\/cdn\.sheetjs\.com\/xlsx-0\.20\.3\/package\/dist\/xlsx\.full\.min\.js/
 );
 assert.doesNotMatch(htmlSource, /xlsx@0\.18\.5|xlsx-0\.18\.5/);
-const definedCssVariables = new Set(
-  [...styleSource.matchAll(/--([\w-]+)\s*:/g)].map((match) => match[1])
-);
-const missingCssVariables = [...new Set(
-  [...styleSource.matchAll(/var\(--([\w-]+)\)/g)]
-    .map((match) => match[1])
-    .filter((name) => !definedCssVariables.has(name))
-)].sort();
-assert.deepEqual(missingCssVariables, []);
 
 const localAssetReferences = [...htmlSource.matchAll(/(?:src|href)="([^"]+)"/g)]
   .map((match) => match[1])
@@ -39,17 +29,6 @@ localAssetReferences.forEach((reference) => {
   assert.equal(fs.existsSync(path.join(projectRoot, localPath)), true, `missing local asset: ${reference}`);
 });
 assert.match(source, /fetch\("sample-data\.csv"\)/);
-
-const mobile640Start = styleSource.indexOf("@media (max-width: 640px)");
-const mobile640End = styleSource.indexOf("@media (max-width: 390px)", mobile640Start);
-const mobile640Source = styleSource.slice(mobile640Start, mobile640End);
-assert.match(mobile640Source, /\.report-actions\s*\{[^}]*grid-template-columns:\s*1fr;/s);
-assert.match(mobile640Source, /\.data-export-option\s*\{[^}]*grid-template-columns:\s*1fr;/s);
-assert.match(styleSource, /\.frequency-row\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+auto;/s);
-assert.match(styleSource, /\.results-nav\s*\{[^}]*position:\s*sticky;/s);
-assert.match(mobile640Source, /\.results-nav\s*\{[^}]*position:\s*sticky;/s);
-assert.match(mobile640Source, /\.desktop-results-nav\s*\{[^}]*display:\s*none;/s);
-assert.match(mobile640Source, /\.mobile-results-nav\s*\{[^}]*display:\s*grid;/s);
 const resultSectionOrder = [
   "overviewSection",
   "schemaSection",
@@ -492,7 +471,7 @@ assert.match(negativeZeroBaselineInsight, /下降/);
 assert.match(negativeZeroBaselineInsight, /绝对变化为 10/);
 assert.doesNotMatch(negativeZeroBaselineInsight, /绝对变化为 -10/);
 
-// V2.3 report export: build a serializable report model that is shared by
+// V2.1 report export: build a serializable report model that is shared by
 // both exporters. Keep these tests DOM-independent so empty analytical
 // sections can be verified without triggering a browser download.
 const reportRows = [

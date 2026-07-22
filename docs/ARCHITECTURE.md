@@ -99,7 +99,7 @@ flowchart LR
 4. `decodeCsvBuffer()` 根据编码选择解码：
    - 自动识别先检查 UTF-8 BOM，再严格尝试 UTF-8，失败后回退 GB18030。
    - 手动模式支持 UTF-8、GBK 和 GB18030。
-5. `parseCsvText()` 使用 PapaParse，配置为表头模式、跳过空行、最多预读 100,001 行，并在支持时启用 Worker。
+5. `parseCsvText()` 在主线程使用 PapaParse，配置为表头模式、跳过空行并最多预读 100,001 行。为保留特殊表头保护所需的 `transformHeader`，此处不启用无法克隆函数配置的 Worker 模式。
 6. 表头先编码为唯一内部键，解析后再还原，以便项目自行检查空表头和重复表头。
 7. `handleParsedData()` 检查多余单元格、引号/分隔符错误、行列上限、空数据和重复字段。
 8. 有效数据规范为无原型行对象，再交给 `commitTabularData()`。
@@ -185,4 +185,3 @@ Chart.js 图表实例统一保存在 `state.charts`：
 - HTML 报告内嵌当前可见 Chart.js 图表的 PNG Data URL，不依赖外部脚本。
 - HTML 内容经过 `escapeHtml()`；Markdown 内容经过对应转义函数。
 - 存在未应用字段类型草稿或分析尚未完成时，报告导出被禁用。
-

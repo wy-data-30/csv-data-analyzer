@@ -30,7 +30,7 @@ The project is built as a static website and does not require a backend service,
 
 - Upload and parse CSV files in the browser.
 - Import `.xlsx` and `.xls` workbooks with SheetJS. Single-sheet files enter analysis directly; multi-sheet files show a worksheet selector first.
-- Reduce large-file responsiveness and memory risks with an import limit of 25 MB, 100,000 data rows, and 200 columns. CSV parsing uses a Web Worker when supported by the browser.
+- Reduce large-file responsiveness and memory risks with an import limit of 25 MB, 100,000 data rows, and 200 columns.
 - Select CSV file encoding manually, including Auto Detect, UTF-8, GBK, and GB18030.
 - Preview the first 10 rows of the dataset.
 - Automatically identify numeric, categorical, date, and ID fields, with semantic handling for student/record identifiers and year columns.
@@ -163,7 +163,7 @@ The repository includes sample CSV files for testing different analysis scenario
 - `sample-survey.csv`: survey data for testing satisfaction, age, gender, city, and choice frequency analysis.
 - `sample-user-behavior.csv`: user behavior data for testing user IDs, events, channels, devices, and event time trends.
 
-The sample files use UTF-8 BOM encoding and include Chinese field names and values. They also contain a small number of missing values, duplicate rows, and outliers to help verify the data quality checks.
+The sample files use UTF-8 BOM encoding and include Chinese field names and values. They contain synthetic records only, plus a small number of missing values, duplicate rows, and outliers to help verify the data quality checks.
 
 `tests/fixtures/excel-import-test.xlsx` is a multi-sheet Excel regression fixture containing Chinese worksheet names and values, plus empty-sheet and missing-header cases.
 
@@ -266,7 +266,7 @@ The page loads pinned PapaParse, Chart.js, and SheetJS files from CDN providers 
 ## Known Limitations
 
 - Each import is limited to 25 MB, 100,000 data rows, and 200 columns to bound browser-side processing. Files above these limits must be split before import.
-- CSV parsing uses a worker where available, but Excel parsing and subsequent analysis still run locally and may temporarily use significant memory near the import limits, especially on mobile devices.
+- CSV and Excel parsing and subsequent analysis run in the browser main thread and may temporarily block the interface or use significant memory near the import limits, especially on mobile devices.
 - Date parsing uses strict format validation. Ambiguous month/day cells require a consistent order inferred from other unambiguous cells in the same column; conflicting evidence leaves those ambiguous cells unconverted and reports them in the field configuration table.
 - Excel analysis expects the first non-empty row of the selected worksheet to contain unique, non-empty text headers. Headerless, empty, protected, or structurally irregular worksheets may be rejected with an error.
 - Field type detection is based on heuristic rules and may require manual confirmation for ambiguous columns.

@@ -22,6 +22,7 @@ test("CSV encoding and parsed rows preserve Chinese headers and values", () => {
         header: options.header,
         skipEmptyLines: options.skipEmptyLines,
         preview: options.preview,
+        worker: options.worker,
         hasHeaderTransform: typeof options.transformHeader === "function"
       };
       const [headerLine, ...dataLines] = text.split(/\r?\n/);
@@ -44,6 +45,7 @@ test("CSV encoding and parsed rows preserve Chinese headers and values", () => {
   assert.equal(context.__papaOptions.header, true);
   assert.equal(context.__papaOptions.skipEmptyLines, true);
   assert.equal(context.__papaOptions.preview, 100001);
+  assert.equal(context.__papaOptions.worker, false);
   assert.equal(context.__papaOptions.hasHeaderTransform, true);
   assert.equal(evaluate("state.rows.length"), 1);
   assert.equal(evaluate('state.fields.join(",")'), "姓名,城市,成绩");

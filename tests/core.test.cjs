@@ -346,7 +346,7 @@ context.Papa = {
 };
 context.window.Papa = context.Papa;
 evaluate('parseCsvText("字段\\n值", "worker.csv", beginImport())');
-assert.equal(context.__workerConfig.worker, true);
+assert.equal(context.__workerConfig.worker, false);
 
 const oneColumnImport = evaluate("beginImport()");
 evaluate(`handleParsedData({

@@ -738,7 +738,9 @@ function parseCsvText(text, sourceName, importId = beginImport()) {
     header: true,
     skipEmptyLines: true,
     preview: IMPORT_LIMITS.maxRows + 1,
-    worker: Boolean(Papa.WORKERS_SUPPORTED),
+    // PapaParse workers cannot clone transformHeader functions. Keep parsing on
+    // the main thread so protected and duplicate header handling remains intact.
+    worker: false,
     transformHeader: encodeCsvHeaderForParser,
     complete: (results) => handleParsedData(results, sourceName, importId),
     error: (error) => showError(error.message, importId)

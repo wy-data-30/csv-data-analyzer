@@ -131,6 +131,8 @@ Run the broader import, export, report, and HTML integration regression suite wi
 npm run test:regression
 ```
 
+GitHub Actions runs this full regression command automatically on every push and pull request.
+
 ## Usage
 
 1. Open the application in a browser.

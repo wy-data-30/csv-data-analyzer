@@ -137,6 +137,8 @@ node --test tests/data-processing.test.cjs
 npm run test:regression
 ```
 
+GitHub Actions 会在每次 push 和 Pull Request 时自动运行这套完整回归测试。
+
 ## 使用方法
 
 1. 在浏览器中打开应用。

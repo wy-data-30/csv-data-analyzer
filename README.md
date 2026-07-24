@@ -37,13 +37,23 @@ Detailed processing rules and data flows are documented in [Architecture](./docs
 
 ## Screenshots
 
-### Upload Workspace
+### Home
 
-![Smart Tabular Analyzer upload workspace](./assets/homepage.png)
+Upload CSV or Excel files, or start immediately with the built-in sample data.
 
-### Analysis Workspace
+![Smart Tabular Analyzer home and file upload](./assets/homepage.png)
 
-![Smart Tabular Analyzer analysis workspace](./assets/analysis-results.png)
+### Data Quality
+
+Review missing values, duplicate rows, and IQR-based numeric outliers in one view.
+
+![Smart Tabular Analyzer data quality checks](./assets/data-quality.png)
+
+### Analysis Results
+
+Compare numeric distributions, categorical Top 10 results, and date trends through interactive charts.
+
+![Smart Tabular Analyzer analysis charts](./assets/analysis-results.png)
 
 ## Privacy
 

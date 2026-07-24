@@ -121,6 +121,26 @@ npm run test:regression
 - [维护指南](./docs/MAINTENANCE.md)：核心约束、依赖更新、部署和故障排查。
 - [发布检查清单](./docs/RELEASE_CHECKLIST.md)：发布前使用的自动化与人工检查。
 
+### 项目结构
+
+```text
+.
+├── index.html
+├── style.css
+├── script.js
+├── examples/
+│   ├── sample-data.csv          # “使用示例数据”加载的文件
+│   ├── sample-sales.csv
+│   ├── sample-students.csv
+│   ├── sample-survey.csv
+│   ├── sample-used-products.csv
+│   └── sample-user-behavior.csv
+├── assets/
+├── docs/
+├── tests/
+└── package.json
+```
+
 ## 已知限制
 
 - 单次导入限制为 25 MB、100,000 行数据和 200 列。

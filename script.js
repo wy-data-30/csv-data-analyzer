@@ -254,7 +254,7 @@ dom.loadSample.addEventListener("click", async () => {
   const importId = beginImport();
   try {
     setStatus("正在加载 sample-data.csv ...");
-    const response = await fetch("sample-data.csv");
+    const response = await fetch("examples/sample-data.csv");
     if (!response.ok) throw new Error("示例数据加载失败");
     const text = await response.text();
     if (!isCurrentImport(importId)) return;

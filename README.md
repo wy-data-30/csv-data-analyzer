@@ -121,6 +121,26 @@ npm run test:regression
 - [Maintenance Guide](./docs/MAINTENANCE.md): core invariants, dependency updates, deployment, and troubleshooting.
 - [Release Checklist](./docs/RELEASE_CHECKLIST.md): automated and manual checks used before publication.
 
+### Project Structure
+
+```text
+.
+├── index.html
+├── style.css
+├── script.js
+├── examples/
+│   ├── sample-data.csv          # Loaded by "Use Sample Data"
+│   ├── sample-sales.csv
+│   ├── sample-students.csv
+│   ├── sample-survey.csv
+│   ├── sample-used-products.csv
+│   └── sample-user-behavior.csv
+├── assets/
+├── docs/
+├── tests/
+└── package.json
+```
+
 ## Known Limitations
 
 - Each import is limited to 25 MB, 100,000 data rows, and 200 columns.

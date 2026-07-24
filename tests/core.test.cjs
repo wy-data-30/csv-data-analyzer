@@ -35,7 +35,7 @@ localAssetReferences.forEach((reference) => {
   const localPath = reference.split(/[?#]/, 1)[0];
   assert.equal(fs.existsSync(path.join(projectRoot, localPath)), true, `missing local asset: ${reference}`);
 });
-assert.match(source, /fetch\("sample-data\.csv"\)/);
+assert.match(source, /fetch\("examples\/sample-data\.csv"\)/);
 const resultSectionOrder = [
   "overviewSection",
   "schemaSection",

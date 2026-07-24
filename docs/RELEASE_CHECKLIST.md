@@ -95,8 +95,7 @@
 - [ ] GitHub Pages 来源分支和目录配置正确。
 - [ ] CI workflow 没有部署步骤，不会覆盖 Pages 发布设置。
 - [ ] 在线首页、`style.css`、`script.js`、示例 CSV 和截图资源返回 200。
-- [ ] 在线演示可以加载 `sample-data.csv`。
+- [ ] 在线演示可以加载 `examples/sample-data.csv`。
 - [ ] 在线演示可以上传一份中文 CSV 和一份多工作表 Excel。
 - [ ] README Live Demo 指向当前仓库的 Pages 地址。
 - [ ] 发布后检查 GitHub Actions 和 Pages 部署状态均成功。
-
